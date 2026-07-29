@@ -1,11 +1,12 @@
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-
+from app.models.dashboard import DashboardStats
 from app.database.database import Base, engine
 from app.database.dependency import get_db
 from app.models.user import User
 from app.core.security import hash_password
 from app.routers.user import router as user_router
+from app.routers.dasnboard import router as dashboard_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -16,7 +17,7 @@ app = FastAPI(
 )
 
 app.include_router(user_router)
-
+app.include_router(dashboard_router)
 
 @app.get("/")
 def root():
