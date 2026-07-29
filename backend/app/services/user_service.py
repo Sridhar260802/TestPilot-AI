@@ -18,3 +18,4 @@ def create_user(db: Session, username: str, email: str, password: str):
     db.refresh(user)
 
     return user
+
