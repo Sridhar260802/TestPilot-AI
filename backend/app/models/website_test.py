@@ -12,5 +12,3 @@ class WebsiteTest(Base):
     response_time = Column(Float, default=0.0)
     ssl_status = Column(String, default="Unknown")
     test_status = Column(String, default="Pending")
-
-    health_score = Column(Integer, default=0)
