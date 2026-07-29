@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
+from app.core.auth import get_current_user
 from app.database.dependency import get_db
 from app.schemas.user import UserCreate, UserResponse,UserLogin
 from app.services.user_service import get_user_by_email, create_user
@@ -65,3 +65,10 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         "access_token": access_token,
         "token_type": "bearer"
     }
+@router.get("/me")
+def get_current_user_info(current_user= Depends(get_current_user)):
+    return {
+        "message": "authentication Success",
+        "user": current_user
+    }   
+    
