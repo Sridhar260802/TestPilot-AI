@@ -1,3 +1,5 @@
+from turtle import update
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.services.seo_service import seo_check
@@ -8,16 +10,12 @@ from app.services.website_service import (
     test_website,
     check_broken_links,
 )
-from app.services.website_service import (
-    test_website,
-    check_broken_links,
-    check_seo,
-    check_accessibility,
-    check_performance,
-)
+
 from app.services.performance_service import performance_check
 from app.services.groq_service import generate_ai_suggestions
-
+from fastapi.responses import FileResponse
+from app.services.dashboard_service import update_dashboard_stats
+from app.services.pdf_service import generate_pdf_report
 from app.services.website_db_service import (
     save_website_test,
     get_all_website_tests,
@@ -41,7 +39,10 @@ def website_test(
         url=data.url,
         result=result
     )
-
+    update_dashboard_stats(
+        db,"website_tests"
+    )
+    
     return result
 
 
@@ -78,22 +79,58 @@ def ai_test(data: WebsiteTestRequest):
 
     website = test_website(data.url)
     broken = check_broken_links(data.url)
-    seo = check_seo(data.url)
-    accessibility = check_accessibility(data.url)
-    performance = check_performance(data.url)
+    seo = seo_check(data.url)
+    accessibility = accessibility_check(data.url)
+    performance = performance_check(data.url)
 
     prompt = f"""
     Website URL: {data.url}
 
-    Website Health: {website["health_score"]}
-    Broken Links: {broken["broken_links"]}
-    SEO Score: {seo["seo_score"]}
-    Accessibility Score: {accessibility["accessibility_score"]}
-    Performance Score: {performance["performance_score"]}
+    Website Health Score: {website.get("health_score", 0)}
+    Broken Links: {broken.get("broken_links", 0)}
+    SEO Score: {seo.get("seo_score", 0)}
+    Accessibility Score: {accessibility.get("accessibility_score", 0)}
+    Performance Score: {performance.get("performance_score", 0)}
 
-    Analyze ONLY this website and give personalized suggestions.
+    Analyze this website and provide:
+    1. Overall website health.
+    2. SEO improvements.
+    3. Accessibility improvements.
+    4. Performance improvements.
+    5. Priority-wise recommendations.
     """
 
     return {
-        "response": generate_ai_suggestions(prompt)
+        "website": website,
+        "broken_links": broken,
+        "seo": seo,
+        "accessibility": accessibility,
+        "performance": performance,
+        "ai_suggestions": generate_ai_suggestions(prompt)
     }
+    
+    
+@router.post("/report")
+def report(data: WebsiteTestRequest,
+           db: Session = Depends(get_db)):
+
+    website = test_website(data.url)
+    seo = seo_check(data.url)
+    accessibility = accessibility_check(data.url)
+    performance = performance_check(data.url)
+
+    report_data = {
+        "Website": data.url,
+        "Health Score": website.get("health_score", 0),
+        "SEO Score": seo.get("seo_score", 0),
+        "Accessibility Score": accessibility.get("accessibility_score", 0),
+        "Performance Score": performance.get("performance_score", 0),
+    }
+
+    pdf = generate_pdf_report(report_data)
+    update_dashboard_stats(db,"reports_generated")
+    return FileResponse(
+        pdf,
+        media_type="application/pdf",
+        filename="Website_Report.pdf"
+    )   
