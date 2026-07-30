@@ -6,10 +6,10 @@ from app.database.dependency import get_db
 from app.models.user import User
 from app.core.security import hash_password
 from app.routers.user import router as user_router
-from app.routers.dasnboard import router as dashboard_router
+from app.routers.dashboard import router as dashboard_router
 from app.models.website_test import WebsiteTest
 from app.routers.website_test import router as website_router
-
+from app.routers.code_analysis import router as code_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,7 +22,7 @@ app = FastAPI(
 app.include_router(user_router)
 app.include_router(dashboard_router)
 app.include_router(website_router)
-
+app.include_router(code_router)
 
 @app.get("/")
 def root():
