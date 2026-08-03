@@ -1,43 +1,78 @@
 import requests
 from bs4 import BeautifulSoup
 
-
 def seo_check(url: str):
-    response = requests.get(url, timeout=10)
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
 
-    soup = BeautifulSoup(response.text, "html.parser")
+        title = soup.title.string.strip() if soup.title else None
 
-    title = soup.title.string.strip() if soup.title else "No Title"
+        meta_description = soup.find(
+            "meta",
+            attrs={"name": "description"}
+        )
 
-    meta_description = (
-        soup.find("meta", attrs={"name": "description"}) is not None
-    )
+        meta_keywords = soup.find(
+            "meta",
+            attrs={"name": "keywords"}
+        )
 
-    h1_tags = len(soup.find_all("h1"))
+        canonical = soup.find(
+            "link",
+            attrs={"rel": "canonical"}
+        )
 
-    images = soup.find_all("img")
+        h1 = soup.find_all("h1")
+        h2 = soup.find_all("h2")
 
-    images_without_alt = sum(
-        1 for img in images if not img.get("alt")
-    )
+        favicon = soup.find(
+            "link",
+            rel=lambda x: x and "icon" in x.lower()
+        )
 
-    score = 100
+        og_title = soup.find(
+            "meta",
+            property="og:title"
+        )
 
-    if not meta_description:
-        score -= 20
+        score = 100
 
-    if h1_tags == 0:
-        score -= 20
+        if not title:
+            score -= 20
 
-    score -= images_without_alt * 5
+        if not meta_description:
+            score -= 20
 
-    if score < 0:
-        score = 0
+        if len(h1) == 0:
+            score -= 20
 
-    return {
-        "title": title,
-        "meta_description": meta_description,
-        "h1_tags": h1_tags,
-        "images_without_alt": images_without_alt,
-        "seo_score": score
-    }
+        if not canonical:
+            score -= 10
+
+        if not favicon:
+            score -= 10
+
+        if not og_title:
+            score -= 10
+
+        if score < 0:
+            score = 0
+
+        return {
+            "title": title,
+            "meta_description": bool(meta_description),
+            "meta_keywords": bool(meta_keywords),
+            "h1_count": len(h1),
+            "h2_count": len(h2),
+            "canonical": bool(canonical),
+            "favicon": bool(favicon),
+            "open_graph": bool(og_title),
+            "seo_score": score
+        }
+
+    except Exception as e:
+        return {
+            "seo_score": 0,
+            "error": str(e)
+        }
