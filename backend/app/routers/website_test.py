@@ -10,7 +10,7 @@ from app.services.website_service import (
     test_website,
     check_broken_links,
 )
-
+from app.services.security_service import security_check
 from app.services.performance_service import performance_check
 from app.services.groq_service import generate_ai_suggestions
 from fastapi.responses import FileResponse
@@ -20,6 +20,7 @@ from app.services.website_db_service import (
     save_website_test,
     get_all_website_tests,
 )
+from app.services.advanced_seo_service import advanced_seo_check
 
 router = APIRouter(
     prefix="/website",
@@ -109,15 +110,37 @@ def ai_test(data: WebsiteTestRequest):
         "ai_suggestions": generate_ai_suggestions(prompt)
     }
     
-    
 @router.post("/report")
-def report(data: WebsiteTestRequest,
-           db: Session = Depends(get_db)):
+def report(
+    data: WebsiteTestRequest,
+    db: Session = Depends(get_db)
+):
 
     website = test_website(data.url)
+    broken = check_broken_links(data.url)
     seo = seo_check(data.url)
     accessibility = accessibility_check(data.url)
     performance = performance_check(data.url)
+
+    prompt = f"""
+Website URL: {data.url}
+
+Website Health Score: {website.get("health_score", 0)}
+Broken Links: {broken.get("broken_links", 0)}
+SEO Score: {seo.get("seo_score", 0)}
+Accessibility Score: {accessibility.get("accessibility_score", 0)}
+Performance Score: {performance.get("performance_score", 0)}
+
+Analyze this website and provide:
+
+1. Overall website health.
+2. SEO improvements.
+3. Accessibility improvements.
+4. Performance improvements.
+5. Priority-wise recommendations.
+"""
+
+    ai = generate_ai_suggestions(prompt)
 
     report_data = {
         "Website": data.url,
@@ -125,12 +148,26 @@ def report(data: WebsiteTestRequest,
         "SEO Score": seo.get("seo_score", 0),
         "Accessibility Score": accessibility.get("accessibility_score", 0),
         "Performance Score": performance.get("performance_score", 0),
+        "Broken Links": broken.get("broken_links", 0),
+        "AI Suggestions": ai
     }
 
     pdf = generate_pdf_report(report_data)
-    update_dashboard_stats(db,"reports_generated")
+
+    update_dashboard_stats(
+        db,
+        "reports_generated"
+    )
+
     return FileResponse(
         pdf,
         media_type="application/pdf",
         filename="Website_Report.pdf"
-    )   
+    )
+    
+@router.post("/advanced-seo")
+def advanced_seo(data: WebsiteTestRequest):
+    return advanced_seo_check(data.url)  
+@router.post("/security")
+def security_test(data: WebsiteTestRequest):
+    return security_check(data.url)  

@@ -1,19 +1,257 @@
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle
+)
 
-def generate_pdf_report(data, filename="website_report.pdf"):
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.units import inch
+from datetime import datetime
+
+
+def calculate_grade(score):
+
+    if score >= 90:
+        return "A+"
+
+    elif score >= 80:
+        return "A"
+
+    elif score >= 70:
+        return "B"
+
+    elif score >= 60:
+        return "C"
+
+    return "D"
+
+
+def generate_pdf_report(
+    data,
+    filename="website_report.pdf"
+):
 
     doc = SimpleDocTemplate(filename)
+
     styles = getSampleStyleSheet()
+
+    title_style = styles["Title"]
+    title_style.alignment = TA_CENTER
+
+    heading_style = styles["Heading2"]
+
+    normal_style = styles["BodyText"]
+
     story = []
 
-    story.append(Paragraph("<b>TestPilot AI - Website Report</b>", styles["Title"]))
-    story.append(Paragraph("<br/>", styles["Normal"]))
+    website = data.get("Website", "")
 
-    for key, value in data.items():
-        story.append(
-            Paragraph(f"<b>{key}</b>: {value}", styles["Normal"])
+    health = int(data.get("Health Score", 0))
+
+    grade = calculate_grade(health)
+
+    story.append(
+        Paragraph(
+            "TestPilot AI",
+            title_style
         )
+    )
+
+    story.append(
+        Paragraph(
+            "Professional Website Audit Report",
+            heading_style
+        )
+    )
+
+    story.append(
+        Spacer(
+            1,
+            0.25 * inch
+        )
+    )
+
+    story.append(
+        Paragraph(
+            f"<b>Website :</b> {website}",
+            normal_style
+        )
+    )
+
+    story.append(
+        Paragraph(
+            f"<b>Generated :</b> {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}",
+            normal_style
+        )
+    )
+
+    story.append(
+        Spacer(
+            1,
+            0.25 * inch
+        )
+    )
+    # =========================
+    # SCORE SUMMARY
+    # =========================
+
+    summary_data = [
+        ["Metric", "Score"],
+        ["Overall Grade", grade],
+        ["Health Score", str(data.get("Health Score", 0))],
+        ["SEO Score", str(data.get("SEO Score", 0))],
+        ["Accessibility Score", str(data.get("Accessibility Score", 0))],
+        ["Performance Score", str(data.get("Performance Score", 0))],
+        ["Broken Links", str(data.get("Broken Links", 0))]
+    ]
+
+    summary_table = Table(
+        summary_data,
+        colWidths=[230, 180]
+    )
+
+    summary_table.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+
+            ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+
+            ("GRID", (0, 0), (-1, -1), 1, colors.grey),
+
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+            ("TOPPADDING", (0, 1), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 8),
+
+            ("ALIGN", (1, 1), (1, -1), "CENTER")
+        ])
+    )
+
+    story.append(summary_table)
+
+    story.append(
+        Spacer(
+            1,
+            0.3 * inch
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "Executive Summary",
+            heading_style
+        )
+    )
+
+    if health >= 90:
+        summary = (
+            "The website is in excellent condition. "
+            "Performance, accessibility and SEO are well optimized."
+        )
+
+    elif health >= 75:
+        summary = (
+            "The website is healthy but there are a few improvements "
+            "recommended for SEO and performance."
+        )
+
+    else:
+        summary = (
+            "The website requires optimization to improve quality, "
+            "SEO and overall performance."
+        )
+
+    story.append(
+        Paragraph(
+            summary,
+            normal_style
+        )
+    )
+
+    story.append(
+        Spacer(
+            1,
+            0.25 * inch
+        )
+    )
+
+    story.append(
+        Paragraph(
+            "Detailed Results",
+            heading_style
+        )
+    )
+    # =========================
+    # AI RECOMMENDATIONS
+    # =========================
+
+    story.append(
+        Paragraph(
+            "AI Recommendations",
+            heading_style
+        )
+    )
+
+    ai_text = data.get(
+        "AI Suggestions",
+        "No AI Suggestions Available."
+    )
+
+    ai_text = (
+        ai_text
+        .replace("\r\n", "<br/>")
+        .replace("\n", "<br/>")
+    )
+
+    story.append(
+        Paragraph(
+            ai_text,
+            normal_style
+        )
+    )
+
+    story.append(
+        Spacer(
+            1,
+            0.35 * inch
+        )
+    )
+
+    # =========================
+    # FOOTER
+    # =========================
+
+    story.append(
+        Table(
+            [[
+                "Generated by TestPilot AI\n"
+                "Professional Website Testing Platform"
+            ]],
+            colWidths=[420]
+        )
+    )
+
+    footer = story[-1]
+
+    footer.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1F4E79")),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ])
+    )
+
+    # =========================
+    # BUILD PDF
+    # =========================
 
     doc.build(story)
 
