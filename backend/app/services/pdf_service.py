@@ -3,17 +3,45 @@ from reportlab.platypus import (
     Paragraph,
     Spacer,
     Table,
-    TableStyle
+    TableStyle,
+    PageBreak
 )
 
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
 from reportlab.lib.units import inch
+
 from datetime import datetime
+import json
+import re
 
 
-def calculate_grade(score):
+
+# ===============================
+# Helper Functions
+# ===============================
+
+
+def clean_issue_text(issue):
+
+    """
+    Remove temp file path from analyzer output
+    """
+
+    if ":" in issue:
+
+        parts = issue.split(":", 3)
+
+        if len(parts) >= 4:
+            return parts[3].strip()
+
+
+    return issue
+
+
+
+def get_grade(score):
 
     if score >= 90:
         return "A+"
@@ -27,232 +55,1077 @@ def calculate_grade(score):
     elif score >= 60:
         return "C"
 
-    return "D"
+    else:
+        return "D"
 
 
-def generate_pdf_report(
-    data,
-    filename="website_report.pdf"
-):
 
-    doc = SimpleDocTemplate(filename)
+def create_styles():
 
     styles = getSampleStyleSheet()
 
-    title_style = styles["Title"]
-    title_style.alignment = TA_CENTER
 
-    heading_style = styles["Heading2"]
+    return {
 
-    normal_style = styles["BodyText"]
+        "title":
+        ParagraphStyle(
+            "title",
+            parent=styles["Title"],
+            alignment=TA_CENTER,
+            fontSize=22,
+            textColor=colors.HexColor("#1F4E79")
+        ),
+
+
+        "heading":
+        ParagraphStyle(
+            "heading",
+            parent=styles["Heading2"],
+            fontSize=14,
+            textColor=colors.HexColor("#1F4E79")
+        ),
+
+
+        "normal":
+        ParagraphStyle(
+            "normal",
+            parent=styles["BodyText"],
+            fontSize=10,
+            leading=14
+        )
+
+    }
+
+
+
+
+
+# ===============================
+# PDF Generator
+# ===============================
+
+
+def generate_code_pdf(
+    data,
+    filename="code_analysis_report.pdf"
+):
+
+
+    doc = SimpleDocTemplate(
+        filename
+    )
+
+
+    styles = create_styles()
+
+
+    title = styles["title"]
+
+    heading = styles["heading"]
+
+    normal = styles["normal"]
+
+
 
     story = []
 
-    website = data.get("Website", "")
 
-    health = int(data.get("Health Score", 0))
 
-    grade = calculate_grade(health)
+    # ---------------------------
+    # Load Data
+    # ---------------------------
 
-    story.append(
-        Paragraph(
-            "TestPilot AI",
-            title_style
-        )
+
+    analysis = data.get(
+        "analysis",
+        {}
     )
 
-    story.append(
-        Paragraph(
-            "Professional Website Audit Report",
-            heading_style
-        )
+
+    security = data.get(
+        "security_analysis",
+        {}
     )
+
+
+
+    if isinstance(
+        analysis,
+        str
+    ):
+
+        analysis = json.loads(
+            analysis
+        )
+
+
+
+    if isinstance(
+        security,
+        str
+    ):
+
+        security = json.loads(
+            security
+        )
+
+
+
+    score = analysis.get(
+        "score",
+        0
+    )
+
+
+    security_score = security.get(
+        "score",
+        0
+    )
+
+
+
+
+    # ---------------------------
+    # Header
+    # ---------------------------
+
+
+    header = Table(
+
+        [
+
+            [
+
+                Paragraph(
+
+                    "<b>TESTPILOT AI</b><br/>"
+                    "Code Analysis Report",
+
+                    title
+
+                )
+
+            ]
+
+        ],
+
+        colWidths=[
+            450
+        ]
+
+    )
+
+
+    header.setStyle(
+
+        TableStyle(
+
+            [
+
+                (
+                    "BACKGROUND",
+                    (0,0),
+                    (-1,-1),
+                    colors.HexColor("#EAF2F8")
+                ),
+
+
+                (
+                    "BOX",
+                    (0,0),
+                    (-1,-1),
+                    1,
+                    colors.HexColor("#1F4E79")
+                ),
+
+
+                (
+                    "ALIGN",
+                    (0,0),
+                    (-1,-1),
+                    "CENTER"
+                )
+
+            ]
+
+        )
+
+    )
+
+
+
+    story.append(
+        header
+    )
+
 
     story.append(
         Spacer(
             1,
-            0.25 * inch
+            0.3*inch
         )
     )
 
-    story.append(
-        Paragraph(
-            f"<b>Website :</b> {website}",
-            normal_style
-        )
-    )
+
+
+
+    # ---------------------------
+    # File Details
+    # ---------------------------
+
 
     story.append(
+
         Paragraph(
-            f"<b>Generated :</b> {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}",
-            normal_style
+
+            f"""
+            <b>File Name :</b> {data.get('filename','')}<br/>
+            <b>Language :</b> {data.get('language','')}<br/>
+            <b>Generated :</b>
+            {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}
+            """,
+
+            normal
+
         )
+
     )
+
+
 
     story.append(
         Spacer(
             1,
-            0.25 * inch
+            0.3*inch
         )
     )
-    # =========================
-    # SCORE SUMMARY
-    # =========================
 
-    summary_data = [
-        ["Metric", "Score"],
-        ["Overall Grade", grade],
-        ["Health Score", str(data.get("Health Score", 0))],
-        ["SEO Score", str(data.get("SEO Score", 0))],
-        ["Accessibility Score", str(data.get("Accessibility Score", 0))],
-        ["Performance Score", str(data.get("Performance Score", 0))],
-        ["Broken Links", str(data.get("Broken Links", 0))]
-    ]
 
-    summary_table = Table(
-        summary_data,
-        colWidths=[230, 180]
+
+
+    # ---------------------------
+    # Score Dashboard
+    # ---------------------------
+
+
+    score_table = Table(
+
+        [
+
+            [
+
+                "Code Quality",
+
+                "Security",
+
+                "Grade"
+
+            ],
+
+
+            [
+
+                f"{score}/100",
+
+                f"{security_score}/100",
+
+                get_grade(score)
+
+            ]
+
+        ],
+
+        colWidths=[
+            150,
+            150,
+            150
+        ]
+
     )
 
-    summary_table.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
 
-            ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
 
-            ("GRID", (0, 0), (-1, -1), 1, colors.grey),
+    score_table.setStyle(
 
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
-            ("TOPPADDING", (0, 1), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 1), (-1, -1), 8),
+        TableStyle(
 
-            ("ALIGN", (1, 1), (1, -1), "CENTER")
-        ])
+            [
+
+                (
+                    "BACKGROUND",
+                    (0,0),
+                    (-1,0),
+                    colors.HexColor("#1F4E79")
+                ),
+
+
+                (
+                    "TEXTCOLOR",
+                    (0,0),
+                    (-1,0),
+                    colors.white
+                ),
+
+
+                (
+                    "GRID",
+                    (0,0),
+                    (-1,-1),
+                    1,
+                    colors.grey
+                ),
+
+
+                (
+                    "ALIGN",
+                    (0,0),
+                    (-1,-1),
+                    "CENTER"
+                )
+
+            ]
+
+        )
+
     )
 
-    story.append(summary_table)
+
+
+    story.append(
+        score_table
+    )
+
 
     story.append(
         Spacer(
             1,
-            0.3 * inch
+            0.4*inch
         )
     )
+        # ===========================
+    # Detected Issues
+    # ===========================
+
 
     story.append(
         Paragraph(
-            "Executive Summary",
-            heading_style
+            "Detected Code Issues",
+            heading
         )
     )
 
-    if health >= 90:
-        summary = (
-            "The website is in excellent condition. "
-            "Performance, accessibility and SEO are well optimized."
+
+    issues = analysis.get(
+        "issues",
+        []
+    )
+
+
+    if isinstance(
+        issues,
+        str
+    ):
+
+        try:
+            issues = json.loads(
+                issues
+            )
+
+        except:
+
+            issues = [
+                issues
+            ]
+
+
+
+    if not issues:
+
+
+        story.append(
+
+            Paragraph(
+                "No issues detected.",
+                normal
+            )
+
         )
 
-    elif health >= 75:
-        summary = (
-            "The website is healthy but there are a few improvements "
-            "recommended for SEO and performance."
-        )
 
     else:
-        summary = (
-            "The website requires optimization to improve quality, "
-            "SEO and overall performance."
+
+
+        issue_table = [
+
+            [
+                "#",
+                "Issue Description"
+            ]
+
+        ]
+
+
+
+        for index, issue in enumerate(
+            issues,
+            start=1
+        ):
+
+
+            cleaned = clean_issue_text(
+                issue
+            )
+
+
+            issue_table.append(
+
+                [
+
+                    str(index),
+
+                    cleaned
+
+                ]
+
+            )
+
+
+
+
+        issue_tbl = Table(
+
+            issue_table,
+
+            colWidths=[
+                40,
+                380
+            ]
+
         )
 
-    story.append(
-        Paragraph(
-            summary,
-            normal_style
+
+
+        issue_tbl.setStyle(
+
+            TableStyle(
+
+                [
+
+                    (
+                        "BACKGROUND",
+                        (0,0),
+                        (-1,0),
+                        colors.HexColor("#1F4E79")
+                    ),
+
+
+                    (
+                        "TEXTCOLOR",
+                        (0,0),
+                        (-1,0),
+                        colors.white
+                    ),
+
+
+                    (
+                        "GRID",
+                        (0,0),
+                        (-1,-1),
+                        0.5,
+                        colors.grey
+                    ),
+
+
+                    (
+                        "VALIGN",
+                        (0,0),
+                        (-1,-1),
+                        "TOP"
+                    )
+
+                ]
+
+            )
+
         )
-    )
+
+
+
+        story.append(
+            issue_tbl
+        )
+
+
 
     story.append(
+
         Spacer(
             1,
-            0.25 * inch
+            0.35*inch
         )
+
     )
 
+
+
+
+
+    # ===========================
+    # Security Analysis
+    # ===========================
+
+
     story.append(
+
         Paragraph(
-            "Detailed Results",
-            heading_style
+            "Security Analysis",
+            heading
         )
+
     )
-    # =========================
-    # AI RECOMMENDATIONS
-    # =========================
+
+
+
+    security_issues = security.get(
+        "issues",
+        []
+    )
+
+
+
+    if not security_issues:
+
+
+        story.append(
+
+            Paragraph(
+                "No security issues detected.",
+                normal
+            )
+
+        )
+
+
+    else:
+
+
+        for item in security_issues:
+
+
+            story.append(
+
+                Paragraph(
+                    f"• {item}",
+                    normal
+                )
+
+            )
+
+
 
     story.append(
-        Paragraph(
-            "AI Recommendations",
-            heading_style
-        )
-    )
 
-    ai_text = data.get(
-        "AI Suggestions",
-        "No AI Suggestions Available."
-    )
-
-    ai_text = (
-        ai_text
-        .replace("\r\n", "<br/>")
-        .replace("\n", "<br/>")
-    )
-
-    story.append(
-        Paragraph(
-            ai_text,
-            normal_style
-        )
-    )
-
-    story.append(
         Spacer(
             1,
-            0.35 * inch
+            0.35*inch
         )
+
     )
 
-    # =========================
-    # FOOTER
-    # =========================
+
+
+
+
+    # ===========================
+    # Severity Summary
+    # ===========================
+
 
     story.append(
-        Table(
-            [[
-                "Generated by TestPilot AI\n"
-                "Professional Website Testing Platform"
-            ]],
-            colWidths=[420]
+
+        Paragraph(
+            "Severity Summary",
+            heading
         )
+
     )
 
-    footer = story[-1]
+
+
+    severity = data.get(
+        "severity",
+        {}
+    )
+
+
+
+    if isinstance(
+        severity,
+        str
+    ):
+
+        try:
+
+            severity = json.loads(
+                severity
+            )
+
+        except:
+
+            severity = {}
+
+
+
+
+    severity_table = [
+
+        [
+            "Level",
+            "Count"
+        ],
+
+
+        [
+            "Critical",
+            severity.get(
+                "critical",
+                0
+            )
+        ],
+
+
+        [
+            "High",
+            severity.get(
+                "high",
+                0
+            )
+        ],
+
+
+        [
+            "Medium",
+            severity.get(
+                "medium",
+                0
+            )
+        ],
+
+
+        [
+            "Low",
+            severity.get(
+                "low",
+                0
+            )
+        ]
+
+    ]
+
+
+
+
+    sev_table = Table(
+
+        severity_table,
+
+        colWidths=[
+            200,
+            100
+        ]
+
+    )
+
+
+
+    sev_table.setStyle(
+
+        TableStyle(
+
+            [
+
+                (
+                    "BACKGROUND",
+                    (0,0),
+                    (-1,0),
+                    colors.HexColor("#1F4E79")
+                ),
+
+
+                (
+                    "TEXTCOLOR",
+                    (0,0),
+                    (-1,0),
+                    colors.white
+                ),
+
+
+                (
+                    "GRID",
+                    (0,0),
+                    (-1,-1),
+                    0.5,
+                    colors.grey
+                ),
+
+
+                (
+                    "ALIGN",
+                    (1,1),
+                    (-1,-1),
+                    "CENTER"
+                )
+
+            ]
+
+        )
+
+    )
+
+
+    story.append(
+        sev_table
+    )
+
+
+
+    story.append(
+
+        Spacer(
+            1,
+            0.35*inch
+        )
+
+    )
+        # ===========================
+    # AI Suggestions
+    # ===========================
+
+
+    story.append(
+
+        Paragraph(
+            "AI Code Review Suggestions",
+            heading
+        )
+
+    )
+
+
+
+    ai = data.get(
+        "ai_suggestions",
+        ""
+    )
+
+
+
+    if isinstance(ai, dict):
+
+        ai_json = ai
+
+
+    else:
+
+        try:
+
+            ai = str(ai)
+
+            ai = re.sub(
+                r"```json|```",
+                "",
+                ai
+            ).strip()
+
+
+            ai_json = json.loads(
+                ai
+            )
+
+
+        except:
+
+
+            ai_json = {}
+
+
+
+
+
+    # Handle double encoded JSON
+
+    if isinstance(ai_json, str):
+
+        try:
+
+            ai_json = json.loads(ai_json)
+
+        except:
+
+            ai_json = {
+                "AI Review": ai_json
+            }
+
+
+
+    if ai_json:
+
+
+        for key, value in ai_json.items():
+
+
+            story.append(
+
+                Paragraph(
+                    f"<b>{key}</b>",
+                    normal
+                )
+
+            )
+
+
+
+            if isinstance(
+                value,
+                list
+            ):
+
+
+                for index, item in enumerate(
+                    value,
+                    start=1
+                ):
+
+
+                    story.append(
+
+                        Paragraph(
+
+                            f"{index}. {item}",
+
+                            normal
+
+                        )
+
+                    )
+
+
+
+            else:
+
+
+                story.append(
+
+                    Paragraph(
+
+                        str(value),
+
+                        normal
+
+                    )
+
+                )
+
+
+
+            story.append(
+
+                Spacer(
+                    1,
+                    0.12*inch
+                )
+
+            )
+
+
+
+    else:
+
+
+        story.append(
+
+            Paragraph(
+
+                "No AI suggestions available.",
+
+                normal
+
+            )
+
+        )
+
+
+
+
+
+    story.append(
+
+        Spacer(
+            1,
+            0.4*inch
+        )
+
+    )
+
+
+
+
+
+    # ===========================
+    # Developer Improvement Summary
+    # ===========================
+
+
+    story.append(
+
+        Paragraph(
+            "Recommended Improvements",
+            heading
+        )
+
+    )
+
+
+    improvements = [
+
+        "Fix code quality issues reported by analyzer.",
+
+        "Remove unused imports and variables.",
+
+        "Add proper documentation and function docstrings.",
+
+        "Improve security by removing hardcoded credentials.",
+
+        "Follow coding standards and best practices."
+
+    ]
+
+
+
+    for index, item in enumerate(
+        improvements,
+        start=1
+    ):
+
+
+        story.append(
+
+            Paragraph(
+
+                f"{index}. {item}",
+
+                normal
+
+            )
+
+        )
+
+
+
+
+    story.append(
+
+        Spacer(
+            1,
+            0.5*inch
+        )
+
+    )
+
+
+
+
+
+    # ===========================
+    # Footer
+    # ===========================
+
+
+    footer = Table(
+
+        [
+
+            [
+
+                "Generated by TestPilot AI"
+
+            ]
+
+        ],
+
+        colWidths=[
+            420
+        ]
+
+    )
+
+
 
     footer.setStyle(
-        TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#1F4E79")),
-            ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-            ("TOPPADDING", (0, 0), (-1, -1), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ])
+
+        TableStyle(
+
+            [
+
+                (
+                    "BACKGROUND",
+                    (0,0),
+                    (-1,-1),
+                    colors.HexColor("#1F4E79")
+                ),
+
+
+                (
+                    "TEXTCOLOR",
+                    (0,0),
+                    (-1,-1),
+                    colors.white
+                ),
+
+
+                (
+                    "ALIGN",
+                    (0,0),
+                    (-1,-1),
+                    "CENTER"
+                ),
+
+
+                (
+                    "TOPPADDING",
+                    (0,0),
+                    (-1,-1),
+                    10
+                ),
+
+
+                (
+                    "BOTTOMPADDING",
+                    (0,0),
+                    (-1,-1),
+                    10
+                )
+
+            ]
+
+        )
+
     )
 
-    # =========================
-    # BUILD PDF
-    # =========================
 
-    doc.build(story)
+
+    story.append(
+        footer
+    )
+
+
+
+
+    # Build PDF
+
+    doc.build(
+        story
+    )
+
 
     return filename

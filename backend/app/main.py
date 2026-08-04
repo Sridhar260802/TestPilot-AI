@@ -10,6 +10,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.models.website_test import WebsiteTest
 from app.routers.website_test import router as website_router
 from app.routers.code_analysis import router as code_router
+from app.routers.pdf_report import router as pdf_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -18,11 +19,12 @@ app = FastAPI(
     version="1.0.0",
     description="AI Powered Software Testing Platform"
 )
-
 app.include_router(user_router)
 app.include_router(dashboard_router)
 app.include_router(website_router)
 app.include_router(code_router)
+app.include_router(pdf_router)
+
 
 @app.get("/")
 def root():

@@ -447,6 +447,7 @@ def analyze_uploaded_file(
         filename=file_data["filename"],
         language=file_data["extension"],
         analysis=result,
+        security=security_results,
         severity=severity,
         ai=ai_review
     )

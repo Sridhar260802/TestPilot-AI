@@ -31,23 +31,23 @@ def analyze_python_code(code: str):
             [
                 "pylint",
                 filename,
-                "--output-format=text"
+                "--output-format=text",
+                "--disable=import-error"
             ],
             capture_output=True,
             text=True
         )
+        print(result.stderr)
+        print(result.stdout)
+        print(result.returncode)
 
 
         report = result.stdout
 
-        issues = []
-
-
-        for line in report.splitlines():
-
-            if re.search(r":[A-Z]\d+:", line):
-                issues.append(line.strip())
-
+        issues = re.findall(
+            r".*?:\d+:\d+:\s+[CRWEF]\d+:\s+.*",
+            report
+        )
 
         score = 0
 
@@ -78,7 +78,7 @@ def analyze_python_code(code: str):
 
         if filename and os.path.exists(filename):
             os.remove(filename)
-
+    
 
 
 # =========================

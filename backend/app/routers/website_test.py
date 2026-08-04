@@ -15,7 +15,7 @@ from app.services.performance_service import performance_check
 from app.services.groq_service import generate_ai_suggestions
 from fastapi.responses import FileResponse
 from app.services.dashboard_service import update_dashboard_stats
-from app.services.pdf_service import generate_pdf_report
+from app.services.pdf_service import clean_issue_text
 from app.services.website_db_service import (
     save_website_test,
     get_all_website_tests,

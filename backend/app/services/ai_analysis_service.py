@@ -7,11 +7,13 @@ def generate_code_ai_review(
     analysis
 ):
 
-    prompt = f"""
+    code = analysis.get("code_analysis", {})
+    security = analysis.get("security_analysis", {})
 
+    prompt = f"""
 You are a Senior Software Code Reviewer.
 
-Analyze this code analysis report.
+Analyze the following Static Code Analysis Report.
 
 File Name:
 {filename}
@@ -19,36 +21,55 @@ File Name:
 Language:
 {language}
 
-Analyzer Result:
+=========================
+CODE ANALYSIS
+=========================
 
-Score:
-{analysis.get("score",0)}
+Code Score:
+{code.get("score", 0)}
 
-Issues:
-{analysis.get("issues",[])}
-Errors:
-{analysis.get("errors","")}
+Code Issues:
+{code.get("issues", [])}
 
+Analyzer Errors:
+{code.get("errors", "")}
 
-Provide:
+=========================
+SECURITY ANALYSIS
+=========================
 
-1. Overall Code Quality
-2. Critical Issues
-3. Security Risks
-4. Performance Improvements
-5. Best Practices
-6. Priority-wise Recommendations
-7. Developer Action Items
+Security Score:
+{security.get("score", 0)}
 
+Security Issues:
+{security.get("issues", [])}
 
-Give response in clear JSON format.
+Security Errors:
+{security.get("errors", "")}
 
+=========================
+
+Generate a professional review in VALID JSON format only.
+
+Return exactly these fields:
+
+{{
+  "Overall Code Quality": "",
+  "Critical Issues": "",
+  "Security Risks": "",
+  "Performance Improvements": "",
+  "Best Practices": "",
+  "Priority-wise Recommendations": [
+    ""
+  ],
+  "Developer Action Items": [
+    ""
+  ]
+}}
+
+Use ONLY the analyzer results above.
+Do not return "Unknown" if scores or issues are available.
+Do not invent issues.
 """
 
-
-    ai_response = generate_ai_suggestions(
-        prompt
-    )
-
-
-    return ai_response
+    return generate_ai_suggestions(prompt)

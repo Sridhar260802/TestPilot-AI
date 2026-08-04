@@ -39,6 +39,14 @@ class CodeAnalysis(Base):
     severity = Column(
         Text
     )
+    
+    analysis_json = Column(
+        Text
+    )
+    
+    security_json = Column(
+        Text
+    )    
 
 
     ai_suggestions = Column(
