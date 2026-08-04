@@ -3,12 +3,12 @@ import json
 from app.models.code_analysis import CodeAnalysis
 
 
-
 def save_code_analysis(
     db,
     filename,
     language,
     analysis,
+    security,
     severity,
     ai
 ):
@@ -19,33 +19,35 @@ def save_code_analysis(
 
         language=language,
 
-        score=analysis.get(
-            "score",
-            0
-        ),
+        score=analysis.get("score", 0),
 
         issues=json.dumps(
-            analysis.get(
-                "issues",
-                []
-            )
+            analysis.get("issues", [])
+        ),
+
+        analysis_json=json.dumps(
+            analysis
+        ),
+
+        security_json=json.dumps(
+            security
         ),
 
         severity=json.dumps(
             severity
         ),
 
-        ai_suggestions=str(ai)
+        ai_suggestions=json.dumps(
+            ai
+        )
 
     )
-
 
     db.add(data)
 
     db.commit()
 
     db.refresh(data)
-
 
     return data
 
