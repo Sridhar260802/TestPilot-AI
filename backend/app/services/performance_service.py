@@ -52,17 +52,37 @@ def performance_check(url: str):
 
         score = 100
 
+        issues = []
+        recommendations = []
+
         if load_time > 3:
             score -= 20
+            issues.append("Page load time is too high.")
+            recommendations.append(
+                "Optimize images, enable caching and minify CSS/JavaScript."
+            )
 
         if page_size > 2000:
             score -= 20
+            issues.append("Large page size detected.")
+            recommendations.append(
+                "Compress images and reduce HTML/CSS/JS size."
+            )
 
         if total_requests > 100:
             score -= 20
+            issues.append("Too many HTTP requests.")
+            recommendations.append(
+                "Combine CSS/JS files and remove unused assets."
+            )
 
         if score < 0:
             score = 0
+
+        if not issues:
+            recommendations.append(
+                "Website performance looks good. Continue monitoring regularly."
+            )
 
         return {
             "page_load_time": load_time,
@@ -71,7 +91,9 @@ def performance_check(url: str):
             "images": len(images),
             "scripts": len(scripts),
             "css_files": len(css),
-            "performance_score": score
+            "performance_score": score,
+            "issues": issues,
+            "recommendations": recommendations
         }
 
     except Exception as e:
@@ -84,5 +106,9 @@ def performance_check(url: str):
             "scripts": 0,
             "css_files": 0,
             "performance_score": 0,
+            "issues": [str(e)],
+            "recommendations": [
+                "Verify the website URL or internet connection."
+            ],
             "error": str(e)
         }

@@ -21,18 +21,31 @@ def advanced_seo_check(url: str):
 
             page.goto(
                 url,
-                wait_until="networkidle",
-                timeout=30000
+                wait_until="domcontentloaded",
+                timeout=60000
             )
+
+            # Wait for React hydration
+            page.wait_for_timeout(5000)
+
+        # Scroll to bottom to load lazy images
+            page.evaluate(
+                "window.scrollTo(0, document.body.scrollHeight);"
+            )
+
+            page.wait_for_timeout(3000)
+
+        # Wait until images exist
+            page.wait_for_selector("img", timeout=15000)
 
             html = page.content()
 
             browser.close()
 
-        soup = BeautifulSoup(
-            html,
-            "html.parser"
-        )
+            soup = BeautifulSoup(
+                html,
+                "html.parser"
+            )
 
         # -----------------------
         # robots.txt
@@ -311,30 +324,60 @@ def advanced_seo_check(url: str):
             if language:
                 lang_exists = True
 
-        # -----------------------
-        # Images
+       # -----------------------
+        # Images (Advanced Detection)
         # -----------------------
 
-        images = soup.find_all("img")
+        images = []
+
+        # Normal img tags
+        images.extend(soup.find_all("img"))
+
+        # picture > source
+        for picture in soup.find_all("picture"):
+            images.extend(picture.find_all("source"))
+
+        # Remove duplicates
+        images = list(dict.fromkeys(images))
 
         total_images = len(images)
 
         missing_alt = 0
-
         lazy_loaded = 0
-
         missing_dimensions = 0
 
         for img in images:
 
-            if not img.get("alt"):
-                missing_alt += 1
+            # ---------- image source ----------
+            src = (
+                img.get("src")
+                or img.get("data-src")
+                or img.get("data-lazy-src")
+                or img.get("srcset")
+                or ""
+            )
 
-            if img.get("loading") == "lazy":
+            if not src:
+                continue
+
+            # ---------- alt ----------
+            if img.name == "img":
+                if not img.get("alt"):
+                    missing_alt += 1
+
+            # ---------- lazy ----------
+            if (
+                img.get("loading") == "lazy"
+                or img.get("data-src")
+                or img.get("data-lazy-src")
+            ):
                 lazy_loaded += 1
 
-            if not img.get("width") or not img.get("height"):
-                missing_dimensions += 1
+            # ---------- dimensions ----------
+            if img.name == "img":
+                if not img.get("width") or not img.get("height"):
+                    missing_dimensions += 1
+        
 
         # -----------------------
         # Headings
@@ -498,4 +541,5 @@ def advanced_seo_check(url: str):
 
             "error": str(e)
 
-        }    
+        }  
+          

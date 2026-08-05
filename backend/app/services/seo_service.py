@@ -59,18 +59,50 @@ def seo_check(url: str):
         if score < 0:
             score = 0
 
+        h1_count = len(h1)
+        h2_count = len(h2)
+        meta_description_content = meta_description.get("content") if meta_description else None
+        meta_keywords_content = meta_keywords.get("content") if meta_keywords else None
+        canonical_url = canonical.get("href") if canonical else None
+        favicon_url = favicon.get("href") if favicon else None
+        og_title_content = og_title.get("content") if og_title else None
+
+        issues = []
+        recommendations = []
+
+        if not meta_keywords:
+            issues.append("Meta keywords tag is missing.")
+            recommendations.append("Add meta keywords for better search engine relevance.")
+
+        if h1_count == 0:
+            issues.append("No H1 heading found.")
+            recommendations.append("Add exactly one H1 heading.")
+
+        if h2_count == 0:
+            issues.append("No H2 headings found.")
+            recommendations.append("Use H2 headings to structure content.")
+
+        if not canonical:
+            issues.append("Canonical tag is missing.")
+            recommendations.append("Add a canonical tag to prevent duplicate content.")
+
+        if not favicon:
+            issues.append("Favicon not found.")
+            recommendations.append("Add a favicon for better branding.")
+
         return {
             "title": title,
-            "meta_description": bool(meta_description),
-            "meta_keywords": bool(meta_keywords),
-            "h1_count": len(h1),
-            "h2_count": len(h2),
-            "canonical": bool(canonical),
-            "favicon": bool(favicon),
-            "open_graph": bool(og_title),
-            "seo_score": score
+            "meta_description": meta_description_content,
+            "meta_keywords": meta_keywords_content,
+            "h1_count": h1_count,
+            "h2_count": h2_count,
+            "canonical": canonical_url,
+            "favicon": favicon_url,
+            "open_graph": og_title_content,
+            "seo_score": score,
+            "issues": issues,
+            "recommendations": recommendations
         }
-
     except Exception as e:
         return {
             "seo_score": 0,

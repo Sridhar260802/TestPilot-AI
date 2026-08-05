@@ -7,13 +7,11 @@ def generate_code_ai_review(
     analysis
 ):
 
-    code = analysis.get("code_analysis", {})
-    security = analysis.get("security_analysis", {})
-
     prompt = f"""
+
 You are a Senior Software Code Reviewer.
 
-Analyze the following Static Code Analysis Report.
+Analyze this code analysis report.
 
 File Name:
 {filename}
@@ -21,55 +19,99 @@ File Name:
 Language:
 {language}
 
-=========================
-CODE ANALYSIS
-=========================
+Analyzer Result:
 
-Code Score:
-{code.get("score", 0)}
+Score:
+{analysis.get("score",0)}
 
-Code Issues:
-{code.get("issues", [])}
+Issues:
+{analysis.get("issues",[])}
+Errors:
+{analysis.get("errors","")}
 
-Analyzer Errors:
-{code.get("errors", "")}
 
-=========================
-SECURITY ANALYSIS
-=========================
+Provide:
+
+1. Overall Code Quality
+2. Critical Issues
+3. Security Risks
+4. Performance Improvements
+5. Best Practices
+6. Priority-wise Recommendations
+7. Developer Action Items
+
+
+Give response in clear JSON format.
+
+"""
+
+
+    ai_response = generate_ai_suggestions(
+        prompt
+    )
+
+
+    return ai_response
+
+
+def generate_website_ai_review(
+    url,
+    health_score,
+    broken_links,
+    seo,
+    accessibility,
+    performance,
+    security
+):
+
+    prompt = f"""
+You are a Senior Website Auditor.
+
+Website URL:
+{url}
+
+Health Score:
+{health_score}
+
+Broken Links:
+{broken_links.get("broken_links",0)}
+
+SEO Score:
+{seo.get("seo_score",0)}
+SEO Issues:
+{seo.get("issues",[])}
+
+Accessibility Score:
+{accessibility.get("accessibility_score",0)}
+
+Accessibility Issues:
+{accessibility.get("issues",[])}
+
+Accessibility Recommendations:
+{accessibility.get("recommendations",[])}
+
+Performance Score:
+{performance.get("performance_score",0)}
+Performance Issues:
+{performance.get("issues",[])}
 
 Security Score:
-{security.get("score", 0)}
-
+{security.get("security_score",0)}
 Security Issues:
-{security.get("issues", [])}
+{security.get("issues",[])}
 
-Security Errors:
-{security.get("errors", "")}
-
-=========================
-
-Generate a professional review in VALID JSON format only.
-
-Return exactly these fields:
+Return JSON only.
 
 {{
-  "Overall Code Quality": "",
-  "Critical Issues": "",
-  "Security Risks": "",
-  "Performance Improvements": "",
-  "Best Practices": "",
-  "Priority-wise Recommendations": [
-    ""
-  ],
-  "Developer Action Items": [
-    ""
-  ]
+    "Overall Website Health":"",
+    "Critical Issues":[],
+    "SEO Improvements":[],
+    "Accessibility Improvements":[],
+    "Performance Improvements":[],
+    "Security Improvements":[],
+    "Priority Recommendations":[],
+    "Developer Action Items":[]
 }}
-
-Use ONLY the analyzer results above.
-Do not return "Unknown" if scores or issues are available.
-Do not invent issues.
 """
 
     return generate_ai_suggestions(prompt)
