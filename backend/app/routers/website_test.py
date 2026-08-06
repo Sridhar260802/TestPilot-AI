@@ -23,6 +23,8 @@ from app.services.website_db_service import (
 )
 from app.services.advanced_seo_service import advanced_seo_check
 from app.services.ai_analysis_service import generate_website_ai_review
+from app.services.functional_testing_service import functional_testing
+from app.services.seo_module14 import seo_module14
 router = APIRouter(
     prefix="/website",
     tags=["Website Testing"]
@@ -39,6 +41,8 @@ def website_test(
     security = security_check(data.url)
 
     seo = advanced_seo_check(data.url)
+    
+    
 
     performance = performance_check(data.url)
 
@@ -258,3 +262,7 @@ def advanced_seo(data: WebsiteTestRequest):
 @router.post("/security")
 def security_test(data: WebsiteTestRequest):
     return security_check(data.url)  
+@router.post("/functional")
+def functional_test(data: WebsiteTestRequest):
+
+    return functional_testing(data.url)
