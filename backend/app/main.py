@@ -11,6 +11,7 @@ from app.models.website_test import WebsiteTest
 from app.routers.website_test import router as website_router
 from app.routers.code_analysis import router as code_router
 from app.routers.pdf_report import router as pdf_router
+from app.services.seo_module14 import seo_module14
 
 Base.metadata.create_all(bind=engine)
 
