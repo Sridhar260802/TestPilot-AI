@@ -4,6 +4,22 @@ from playwright.sync_api import sync_playwright
 from urllib.parse import urljoin
 import os
 import time
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak
+)
+from reportlab.lib.units import mm
+from pathlib import Path
+
+
 
 # =====================================
 # Default Credentials
@@ -94,8 +110,11 @@ def website_open_test(page, url):
 
         response = page.goto(
             url,
-            wait_until="networkidle"
+            wait_until="domcontentloaded",
+            timeout=60000
         )
+
+        page.wait_for_timeout(3000)
 
         if response is None:
 
@@ -291,7 +310,7 @@ def navigation_links_test(page, url):
                 })
 
         result["total_links"] = total_links
-        result["broken_links"] = len(broken_links)
+        result["details"] = len(broken_links)
         result["empty_links"] = len(empty_links)
 
         if broken_links or empty_links:
@@ -828,39 +847,57 @@ def buttons_test(page):
 
         print("\n========== BUTTON TEST START ==========")
 
-        page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        # ------------------------------------------------
+        # PAGE READY
+        # ------------------------------------------------
 
-        buttons = page.locator(
-            "button:visible, input[type='submit']:visible, input[type='button']:visible, a[role='button']:visible"
+        print("[5.1] Preparing page...")
+
+        page.wait_for_load_state(
+            "domcontentloaded",
+            timeout=60000
         )
 
-        button_names = []
+        page.wait_for_timeout(2000)
 
-        for i in range(buttons.count()):
+        print(f"Current URL : {page.url}")
 
-            try:
+        # ------------------------------------------------
+        # FIND BUTTONS
+        # ------------------------------------------------
 
-                txt = buttons.nth(i).inner_text().strip()
+        print("\n[5.2] Finding visible buttons...")
 
-                if txt != "" and txt not in button_names:
+        buttons = page.locator(
+            "button:visible, "
+            "input[type='submit']:visible, "
+            "input[type='button']:visible, "
+            "a[role='button']:visible"
+        )
 
-                    button_names.append(txt)
+        total_detected = buttons.count()
 
-            except:
-                pass
+        print(
+            f"Detected Visible Buttons : "
+            f"{total_detected}"
+        )
 
-        print(f"Unique Visible Buttons : {len(button_names)}")
+        if total_detected == 0:
 
-        if len(button_names) == 0:
-
-            print("❌ No Buttons Found")
+            print("❌ No buttons found")
 
             result["status"] = "FAIL"
-            result["issue"] = "No buttons found."
-            result["possible_reason"] = "UI missing."
-            result["recommendation"] = "Verify frontend."
-            result["developer_action"] = "Check components."
+            result["issue"] = "No visible buttons found."
+            result["possible_reason"] = (
+                "Website may not contain interactive buttons."
+            )
+            result["recommendation"] = (
+                "Verify the frontend button elements."
+            )
+            result["developer_action"] = (
+                "Check button components and selectors."
+            )
+
             result["screenshot"] = save_screenshot(
                 page,
                 "buttons_missing.png"
@@ -868,41 +905,240 @@ def buttons_test(page):
 
             return result
 
-        failed_buttons = []
-        passed_buttons = []
-        js_errors = []
+        # ------------------------------------------------
+        # CREATE UNIQUE BUTTON LIST
+        # ------------------------------------------------
 
-        page.on(
-            "pageerror",
-            lambda err: js_errors.append(str(err))
-        )
+        print("\n[5.3] Preparing unique button list...")
 
-        for i, name in enumerate(button_names):
+        button_data = []
+        seen = set()
 
-            print(f"\nChecking Button : {i+1}")
-            print(f"Text : {name}")
-
-            button = page.get_by_text(name, exact=True).first
+        for i in range(total_detected):
 
             try:
 
-                text = button.inner_text().strip()
+                button = buttons.nth(i)
+
+                # Get text safely
+                try:
+                    text = button.inner_text(
+                        timeout=2000
+                    ).strip()
+                except:
+                    text = ""
+
+                # For input buttons
+                if text == "":
+
+                    try:
+                        text = button.get_attribute(
+                            "value"
+                        ) or ""
+                    except:
+                        pass
+
+                # For aria-label
+                if text == "":
+
+                    try:
+                        text = button.get_attribute(
+                            "aria-label"
+                        ) or ""
+                    except:
+                        pass
+
+                text = text.strip()
 
                 if text == "":
-                    text = f"Button {i+1}"
+                    text = f"Button {i + 1}"
 
-                print("\n--------------------------------")
-                print(f"Checking Button : {i+1}")
-                print(f"Text : {text}")
+                # Unique key
+                key = (
+                    text,
+                    button.get_attribute("type"),
+                    button.get_attribute("href")
+                )
 
-                # Visible
+                if key not in seen:
 
-                visible = button.is_visible()
-                print(f"Visible : {visible}")
+                    seen.add(key)
+
+                    button_data.append(
+                        {
+                            "index": i,
+                            "text": text
+                        }
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ Could not inspect button "
+                    f"{i + 1}: {e}"
+                )
+
+        print(
+            f"Unique Visible Buttons : "
+            f"{len(button_data)}"
+        )
+
+        # ------------------------------------------------
+        # JAVASCRIPT ERROR MONITORING
+        # ------------------------------------------------
+
+        js_errors = []
+
+        def handle_page_error(error):
+
+            try:
+                js_errors.append(
+                    str(error)
+                )
+            except:
+                pass
+
+        page.on(
+            "pageerror",
+            handle_page_error
+        )
+
+        # ------------------------------------------------
+        # TEST BUTTONS
+        # ------------------------------------------------
+
+        passed_buttons = []
+        failed_buttons = []
+
+        for position, data in enumerate(
+            button_data,
+            start=1
+        ):
+
+            text = data["text"]
+
+            print("\n--------------------------------")
+            print(
+                f"Checking Button : "
+                f"{position}"
+            )
+            print(
+                f"Text : {text}"
+            )
+
+            try:
+
+                # Re-fetch buttons every time
+                # because page DOM may change
+                current_buttons = page.locator(
+                    "button:visible, "
+                    "input[type='submit']:visible, "
+                    "input[type='button']:visible, "
+                    "a[role='button']:visible"
+                )
+
+                target = None
+
+                # ------------------------------------------------
+                # FIND SAME BUTTON BY TEXT
+                # ------------------------------------------------
+
+                for j in range(
+                    current_buttons.count()
+                ):
+
+                    candidate = current_buttons.nth(j)
+
+                    try:
+
+                        candidate_text = ""
+
+                        try:
+                            candidate_text = (
+                                candidate.inner_text(
+                                    timeout=1000
+                                ).strip()
+                        )
+                        except:
+                            pass
+
+                        if candidate_text == "":
+
+                            try:
+                                candidate_text = (
+                                    candidate.get_attribute(
+                                        "value"
+                                    ) or ""
+                                ).strip()
+                            except:
+                                pass
+
+                        if candidate_text == "":
+
+                            try:
+                                candidate_text = (
+                                    candidate.get_attribute(
+                                        "aria-label"
+                                    ) or ""
+                                ).strip()
+                            except:
+                                pass
+
+                        if candidate_text == text:
+
+                            target = candidate
+                            break
+
+                    except:
+                        continue
+
+                # ------------------------------------------------
+                # IF TEXT MATCH FAILED, USE ORIGINAL INDEX
+                # ------------------------------------------------
+
+                if target is None:
+
+                    original_index = data["index"]
+
+                    if (
+                        original_index
+                        <
+                        current_buttons.count()
+                    ):
+
+                        target = (
+                            current_buttons.nth(
+                                original_index
+                            )
+                        )
+
+                if target is None:
+
+                    print(
+                        "❌ Button could not be located"
+                    )
+
+                    failed_buttons.append(
+                        f"{text} (Button not found)"
+                    )
+
+                    continue
+
+                # ------------------------------------------------
+                # VISIBILITY
+                # ------------------------------------------------
+
+                visible = target.is_visible()
+
+                print(
+                    f"Visible : {visible}"
+                )
 
                 if not visible:
 
-                    print("❌ Hidden")
+                    print(
+                        "❌ Button not visible"
+                    )
 
                     failed_buttons.append(
                         f"{text} (Hidden)"
@@ -910,14 +1146,27 @@ def buttons_test(page):
 
                     continue
 
-                # Enabled
+                # ------------------------------------------------
+                # ENABLED
+                # ------------------------------------------------
 
-                enabled = button.is_enabled()
-                print(f"Enabled : {enabled}")
+                try:
+
+                    enabled = target.is_enabled()
+
+                except:
+
+                    enabled = True
+
+                print(
+                    f"Enabled : {enabled}"
+                )
 
                 if not enabled:
 
-                    print("❌ Disabled")
+                    print(
+                        "❌ Button disabled"
+                    )
 
                     failed_buttons.append(
                         f"{text} (Disabled)"
@@ -925,121 +1174,410 @@ def buttons_test(page):
 
                     continue
 
-                # Click
+                # ------------------------------------------------
+                # RECORD BEFORE STATE
+                # ------------------------------------------------
 
-                print("Clicking...")
+                before_url = page.url
 
-                original_url = page.url
+                before_count = page.locator(
+                    "body"
+                ).inner_text(
+                    timeout=3000
+                )
 
-                button.click(
+                before_error_count = len(
+                    js_errors
+                )
+
+                print(
+                    f"Before URL : "
+                    f"{before_url}"
+                )
+
+                # ------------------------------------------------
+                # CLICK
+                # ------------------------------------------------
+
+                print(
+                    "Clicking..."
+                )
+
+                target.click(
                     timeout=5000,
                     force=True,
                     no_wait_after=True
                 )
 
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(
+                    1500
+                )
 
-                current_url = page.url
+                # ------------------------------------------------
+                # AFTER STATE
+                # ------------------------------------------------
 
-                print(f"Before URL : {original_url}")
-                print(f"After URL  : {current_url}")
+                after_url = page.url
 
-                if current_url != original_url:
+                try:
 
-                    print("✅ Redirect Working")
-
-                    passed_buttons.append(text)
-
-                    # Return back to original page
-                    page.goto(
-                        original_url,
-                        wait_until="networkidle"
+                    after_count = page.locator(
+                        "body"
+                    ).inner_text(
+                        timeout=3000
                     )
 
-                    page.wait_for_timeout(2000)
+                except:
+
+                    after_count = before_count
+
+                after_error_count = len(
+                    js_errors
+                )
+
+                print(
+                    f"After URL  : "
+                    f"{after_url}"
+                )
+
+                # ------------------------------------------------
+                # ACTION DETECTION
+                # ------------------------------------------------
+
+                url_changed = (
+                    after_url
+                    !=
+                    before_url
+                )
+
+                content_changed = (
+                    after_count
+                    !=
+                    before_count
+                )
+
+                js_error_created = (
+                    after_error_count
+                    >
+                    before_error_count
+                )
+
+                # Check common UI changes
+                dialogs = page.locator(
+                    "[role='dialog']:visible, "
+                    "[aria-modal='true']:visible"
+                )
+
+                menus = page.locator(
+                    "[role='menu']:visible, "
+                    "[role='listbox']:visible"
+                )
+
+                search_inputs = page.locator(
+                    "input[type='search']:visible, "
+                    "input[placeholder*='Search' i]:visible"
+                )
+
+                try:
+                    dialog_visible = (
+                        dialogs.count() > 0
+                    )
+                except:
+                    dialog_visible = False
+
+                try:
+                    menu_visible = (
+                        menus.count() > 0
+                    )
+                except:
+                    menu_visible = False
+
+                try:
+                    search_visible = (
+                        search_inputs.count() > 0
+                    )
+                except:
+                    search_visible = False
+
+                # ------------------------------------------------
+                # RESULT
+                # ------------------------------------------------
+
+                if js_error_created:
+
+                    print(
+                        "❌ JavaScript error "
+                        "occurred after click"
+                    )
+
+                    failed_buttons.append(
+                        f"{text} "
+                        f"(JavaScript error)"
+                    )
+
+                elif (
+                    url_changed
+                    or
+                    content_changed
+                    or
+                    dialog_visible
+                    or
+                    menu_visible
+                    or
+                    search_visible
+                ):
+
+                    print(
+                        "✅ Button action detected"
+                    )
+
+                    if url_changed:
+                        print(
+                            "   ↳ URL changed"
+                        )
+
+                    if content_changed:
+                        print(
+                            "   ↳ Page content changed"
+                        )
+
+                    if dialog_visible:
+                        print(
+                            "   ↳ Dialog opened"
+                        )
+
+                    if menu_visible:
+                        print(
+                            "   ↳ Menu/Listbox opened"
+                        )
+
+                    if search_visible:
+                        print(
+                            "   ↳ Search interface opened"
+                        )
+
+                    passed_buttons.append(
+                        text
+                    )
 
                 else:
 
-                    print("❌ No Redirect")
+                    # Important:
+                    # Same URL alone is NOT a failure.
+                    # The click itself completed successfully,
+                    # but no observable UI action was detected.
+
+                    print(
+                        "⚠️ Click completed"
+                    )
+
+                    print(
+                        "   ↳ URL unchanged"
+                    )
+
+                    print(
+                        "   ↳ No visible UI/content change detected"
+                    )
 
                     failed_buttons.append(
-                        f"{text} (No Redirect)"
+                        f"{text} "
+                        f"(No observable action)"
                     )
 
             except Exception as e:
 
-                print("❌ Click Failed")
-                print(e)
+                print(
+                    "❌ Click Failed"
+                )
+
+                print(
+                    f"Error : {e}"
+                )
 
                 failed_buttons.append(
                     f"{text} ({str(e)})"
                 )
 
+            # ------------------------------------------------
+            # RETURN TO ORIGINAL PAGE
+            # ------------------------------------------------
+
+            try:
+
+                if page.url != before_url:
+
+                    print(
+                        "Returning to original page..."
+                    )
+
+                    page.goto(
+                        before_url,
+                        wait_until="domcontentloaded",
+                        timeout=60000
+                    )
+
+                    page.wait_for_timeout(
+                        1500
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ Could not return to page: "
+                    f"{e}"
+                )
+
+        # ------------------------------------------------
+        # FINAL COUNTS
+        # ------------------------------------------------
+
         print("\n================================")
-        print(f"Passed Buttons : {len(passed_buttons)}")
-        print(f"Failed Buttons : {len(failed_buttons)}")
+
+        print(
+            f"Total Buttons  : "
+            f"{len(button_data)}"
+        )
+
+        print(
+            f"Passed Buttons : "
+            f"{len(passed_buttons)}"
+        )
+
+        print(
+            f"Failed Buttons : "
+            f"{len(failed_buttons)}"
+        )
+
         print("================================")
 
-        result["total_buttons"] = len(button_names)
-        result["passed_buttons"] = len(passed_buttons)
-        result["failed_buttons"] = len(failed_buttons)
-        result["javascript_errors"] = js_errors
+        # ------------------------------------------------
+        # RESULT
+        # ------------------------------------------------
+
+        result["total_buttons"] = (
+            len(button_data)
+        )
+
+        result["passed_buttons"] = (
+            len(passed_buttons)
+        )
+
+        result["failed_buttons"] = (
+            len(failed_buttons)
+        )
+
+        result["javascript_errors"] = (
+            js_errors
+        )
+
+        result["details"] = (
+            failed_buttons
+        )
+
+        # ------------------------------------------------
+        # STATUS
+        # ------------------------------------------------
 
         if failed_buttons:
 
             result["status"] = "FAIL"
-            result["issue"] = (
-                f"{len(failed_buttons)} Button(s) Failed."
-            )
-            result["possible_reason"] = (
-                "Button click issue."
-            )
-            result["recommendation"] = (
-                "Verify onclick / routing."
-            )
-            result["developer_action"] = (
-                "Fix frontend."
-            )
-            result["details"] = failed_buttons
 
-            result["screenshot"] = save_screenshot(
-                page,
-                "buttons_failed.png"
+            result["issue"] = (
+                f"{len(failed_buttons)} "
+                f"Button(s) Failed."
+            )
+
+            result["possible_reason"] = (
+                "Button click produced no "
+                "observable action or an error occurred."
+            )
+
+            result["recommendation"] = (
+                "Verify onclick handlers, routing, "
+                "dropdowns, modals and interactive UI behaviour."
+            )
+
+            result["developer_action"] = (
+                "Review frontend button event handlers."
+            )
+
+            result["screenshot"] = (
+                save_screenshot(
+                    page,
+                    "buttons_failed.png"
+                )
             )
 
         else:
 
             result["status"] = "PASS"
 
-            result["screenshot"] = save_screenshot(
-                page,
-                "buttons_success.png"
+            result["issue"] = ""
+
+            result["possible_reason"] = ""
+
+            result["recommendation"] = (
+                "All tested buttons performed "
+                "a valid observable action."
             )
 
-        print("========== BUTTON TEST END ==========\n")
+            result["developer_action"] = ""
+
+            result["screenshot"] = (
+                save_screenshot(
+                    page,
+                    "buttons_success.png"
+                )
+            )
+
+        print(
+            "========== BUTTON TEST END ==========\n"
+        )
 
         return result
 
+    # ------------------------------------------------
+    # MODULE EXCEPTION
+    # ------------------------------------------------
+
     except Exception as e:
 
-        print("\n❌ BUTTON MODULE EXCEPTION")
-        print(e)
+        print(
+            "\n❌ BUTTON MODULE EXCEPTION"
+        )
+
+        print(
+            f"Error : {e}"
+        )
 
         result["status"] = "FAIL"
+
         result["issue"] = str(e)
-        result["possible_reason"] = "Button testing exception."
-        result["recommendation"] = "Verify buttons."
-        result["developer_action"] = "Review frontend."
+
+        result["possible_reason"] = (
+            "Unexpected button testing exception."
+        )
+
+        result["recommendation"] = (
+            "Verify button selectors and Playwright execution."
+        )
+
+        result["developer_action"] = (
+            "Review button testing logs."
+        )
 
         try:
 
-            result["screenshot"] = save_screenshot(
-                page,
-                "buttons_exception.png"
+            result["screenshot"] = (
+                save_screenshot(
+                    page,
+                    "buttons_exception.png"
+                )
             )
 
         except:
-            pass
+
+            result["screenshot"] = ""
 
         return result    
     
@@ -3091,6 +3629,690 @@ def content_quality_test(page):
         
         return result
     
+    
+    
+# ----------------------------------------------------
+# MODULE 10 : AUTHENTICATION TESTING
+# ----------------------------------------------------
+
+def authentication_test(page):
+
+    print("========== AUTHENTICATION TEST START ==========\n")
+
+    issues = []
+    screenshots = []
+
+    login_fields = []
+    password_fields = []
+    auth_buttons = []
+
+    passed_features = 0
+    failed_features = 0
+    tested_features = 0
+
+    # ------------------------------------------------
+    # 10.1 PAGE CHECK
+    # ------------------------------------------------
+
+    print("[10.1] Checking current page...")
+
+    try:
+
+        print(f"Current URL : {page.url}")
+        print("Page available")
+
+    except Exception as e:
+
+        print("❌ Page check failed")
+        print(f"Error : {e}")
+
+        return {
+            "module": "Authentication Testing",
+            "status": "FAIL",
+            "login_fields": 0,
+            "password_fields": 0,
+            "auth_buttons": 0,
+            "tested_features": 1,
+            "passed_features": 0,
+            "failed_features": 1,
+            "module_score": 0,
+            "issues": [str(e)],
+            "recommendations": [
+                "Verify website availability."
+            ],
+            "screenshots": [],
+            "issue": str(e),
+            "possible_reason": "Page could not be accessed.",
+            "developer_action": "Review Playwright logs."
+        }
+
+    # ------------------------------------------------
+    # 10.2 SEARCH LOGIN / EMAIL FIELDS
+    # ------------------------------------------------
+
+    print("\n[10.2] Searching authentication input fields...")
+
+    try:
+
+        inputs = page.locator(
+            "input:visible"
+        )
+
+        total_inputs = inputs.count()
+
+        print(
+            f"Visible input fields : {total_inputs}"
+        )
+
+        for i in range(total_inputs):
+
+            try:
+
+                field = inputs.nth(i)
+
+                input_type = (
+                    field.get_attribute("type")
+                    or ""
+                ).lower()
+
+                name = (
+                    field.get_attribute("name")
+                    or ""
+                ).lower()
+
+                placeholder = (
+                    field.get_attribute("placeholder")
+                    or ""
+                ).lower()
+
+                aria_label = (
+                    field.get_attribute("aria-label")
+                    or ""
+                ).lower()
+
+                combined = (
+                    f"{input_type} "
+                    f"{name} "
+                    f"{placeholder} "
+                    f"{aria_label}"
+                )
+
+                if (
+                    input_type == "email"
+                    or
+                    "email" in combined
+                    or
+                    "username" in combined
+                    or
+                    "user name" in combined
+                    or
+                    "login" in combined
+                ):
+
+                    login_fields.append(i)
+
+                    print(
+                        f"Login field detected : "
+                        f"{i + 1}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"Input {i + 1} skipped : {e}"
+                )
+
+    except Exception as e:
+
+        print("❌ Authentication input scan failed")
+        print(f"Error : {e}")
+
+        issues.append(
+            f"Authentication input scan failed: {str(e)}"
+        )
+
+    # ------------------------------------------------
+    # 10.3 SEARCH PASSWORD FIELDS
+    # ------------------------------------------------
+
+    print("\n[10.3] Searching password fields...")
+
+    try:
+
+        password_locator = page.locator(
+            "input[type='password']:visible"
+        )
+
+        password_count = password_locator.count()
+
+        print(
+            f"Password fields found : "
+            f"{password_count}"
+        )
+
+        for i in range(password_count):
+
+            password_fields.append(i)
+
+            print(
+                f"Password field detected : "
+                f"{i + 1}"
+            )
+
+    except Exception as e:
+
+        print("❌ Password field scan failed")
+        print(f"Error : {e}")
+
+        issues.append(
+            f"Password field scan failed: {str(e)}"
+        )
+
+    # ------------------------------------------------
+    # 10.4 SEARCH AUTHENTICATION BUTTONS
+    # ------------------------------------------------
+
+    print(
+        "\n[10.4] Searching login/sign-in buttons..."
+    )
+
+    try:
+
+        buttons = page.locator(
+            "button:visible, "
+            "input[type='submit']:visible, "
+            "input[type='button']:visible, "
+            "a[role='button']:visible"
+        )
+
+        button_count = buttons.count()
+
+        print(
+            f"Visible buttons found : "
+            f"{button_count}"
+        )
+
+        auth_keywords = [
+            "login",
+            "log in",
+            "signin",
+            "sign in",
+            "authenticate",
+            "continue"
+        ]
+
+        for i in range(button_count):
+
+            try:
+
+                button = buttons.nth(i)
+
+                text = button.inner_text(
+                    timeout=3000
+                ).strip()
+
+                text_lower = text.lower()
+
+                if any(
+                    keyword in text_lower
+                    for keyword in auth_keywords
+                ):
+
+                    auth_buttons.append({
+                        "index": i,
+                        "text": text or f"Auth Button {i + 1}"
+                    })
+
+                    print(
+                        f"Authentication button detected : "
+                        f"{text or 'Unnamed Button'}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"Button {i + 1} skipped : {e}"
+                )
+
+    except Exception as e:
+
+        print("❌ Authentication button scan failed")
+        print(f"Error : {e}")
+
+        issues.append(
+            f"Authentication button scan failed: {str(e)}"
+        )
+
+    # ------------------------------------------------
+    # 10.5 AUTHENTICATION FEATURE CHECK
+    # ------------------------------------------------
+
+    print(
+        "\n[10.5] Checking authentication functionality..."
+    )
+
+    print(
+        f"Login fields detected    : "
+        f"{len(login_fields)}"
+    )
+
+    print(
+        f"Password fields detected : "
+        f"{len(password_fields)}"
+    )
+
+    print(
+        f"Auth buttons detected    : "
+        f"{len(auth_buttons)}"
+    )
+
+    # ------------------------------------------------
+    # If no authentication UI exists
+    # ------------------------------------------------
+
+    if (
+        len(login_fields) == 0
+        and
+        len(password_fields) == 0
+        and
+        len(auth_buttons) == 0
+    ):
+
+        print(
+            "ℹ️ No authentication functionality "
+            "detected on this page."
+        )
+
+        print(
+            "Module treated as PASS because "
+            "there was no authentication feature to test."
+        )
+
+        status = "PASS"
+        module_score = 100
+
+        recommendations = [
+            "No authentication functionality detected.",
+            "Module passed because there was no authentication feature available for testing."
+        ]
+
+        issue = ""
+
+        possible_reason = (
+            "The current webpage does not contain "
+            "login or authentication controls."
+        )
+
+        developer_action = (
+            "No action required unless this page "
+            "is expected to provide authentication."
+        )
+
+    # ------------------------------------------------
+    # Authentication UI exists
+    # ------------------------------------------------
+
+    else:
+
+        # --------------------------------------------
+        # Validate login fields
+        # --------------------------------------------
+
+        if len(login_fields) > 0:
+
+            for index in login_fields:
+
+                try:
+
+                    field = inputs.nth(index)
+
+                    visible = field.is_visible()
+                    enabled = field.is_enabled()
+
+                    print(
+                        f"Login field {index + 1} "
+                        f"| Visible : {visible} "
+                        f"| Enabled : {enabled}"
+                    )
+
+                    tested_features += 1
+
+                    if visible and enabled:
+
+                        passed_features += 1
+
+                        print(
+                            "✅ Login field PASS"
+                        )
+
+                    else:
+
+                        failed_features += 1
+
+                        print(
+                            "❌ Login field FAIL"
+                        )
+
+                        issues.append(
+                            f"Login field {index + 1} is not usable."
+                        )
+
+                except Exception as e:
+
+                    failed_features += 1
+                    tested_features += 1
+
+                    print(
+                        f"❌ Login field validation failed : {e}"
+                    )
+
+                    issues.append(
+                        f"Login field validation failed: {str(e)}"
+                    )
+
+        # --------------------------------------------
+        # Validate password fields
+        # --------------------------------------------
+
+        if len(password_fields) > 0:
+
+            for index in password_fields:
+
+                try:
+
+                    field = page.locator(
+                        "input[type='password']:visible"
+                    ).nth(index)
+
+                    visible = field.is_visible()
+                    enabled = field.is_enabled()
+
+                    print(
+                        f"Password field {index + 1} "
+                        f"| Visible : {visible} "
+                        f"| Enabled : {enabled}"
+                    )
+
+                    tested_features += 1
+
+                    if visible and enabled:
+
+                        passed_features += 1
+
+                        print(
+                            "✅ Password field PASS"
+                        )
+
+                    else:
+
+                        failed_features += 1
+
+                        print(
+                            "❌ Password field FAIL"
+                        )
+
+                        issues.append(
+                            f"Password field {index + 1} is not usable."
+                        )
+
+                except Exception as e:
+
+                    failed_features += 1
+                    tested_features += 1
+
+                    print(
+                        f"❌ Password field validation failed : {e}"
+                    )
+
+                    issues.append(
+                        f"Password field validation failed: {str(e)}"
+                    )
+
+        # --------------------------------------------
+        # Validate authentication buttons
+        # --------------------------------------------
+
+        if len(auth_buttons) > 0:
+
+            for item in auth_buttons:
+
+                try:
+
+                    button = buttons.nth(
+                        item["index"]
+                    )
+
+                    visible = button.is_visible()
+                    enabled = button.is_enabled()
+
+                    print(
+                        f"Auth Button : {item['text']}"
+                    )
+
+                    print(
+                        f"Visible : {visible}"
+                    )
+
+                    print(
+                        f"Enabled : {enabled}"
+                    )
+
+                    tested_features += 1
+
+                    if visible and enabled:
+
+                        passed_features += 1
+
+                        print(
+                            "✅ Authentication button PASS"
+                        )
+
+                    else:
+
+                        failed_features += 1
+
+                        print(
+                            "❌ Authentication button FAIL"
+                        )
+
+                        issues.append(
+                            f"Authentication button "
+                            f"{item['text']} is not usable."
+                        )
+
+                except Exception as e:
+
+                    failed_features += 1
+                    tested_features += 1
+
+                    print(
+                        f"❌ Authentication button validation failed : {e}"
+                    )
+
+                    issues.append(
+                        "Authentication button validation failed: "
+                        f"{str(e)}"
+                    )
+
+        # --------------------------------------------
+        # Final authentication status
+        # --------------------------------------------
+
+        if failed_features > 0:
+
+            status = "FAIL"
+
+            module_score = int(
+                (
+                    passed_features /
+                    tested_features
+                ) * 100
+            )
+
+            recommendations = [
+                "Fix authentication UI issues.",
+                "Verify login and password fields.",
+                "Verify authentication button functionality."
+            ]
+
+            issue = (
+                f"{failed_features} authentication "
+                "feature(s) failed."
+            )
+
+            possible_reason = (
+                "One or more authentication controls "
+                "were not usable."
+            )
+
+            developer_action = (
+                "Review login fields, password fields "
+                "and authentication controls."
+            )
+
+        else:
+
+            status = "PASS"
+            module_score = 100
+
+            recommendations = [
+                "Authentication controls are visible and usable."
+            ]
+
+            issue = ""
+            possible_reason = ""
+            developer_action = ""
+
+    # ------------------------------------------------
+    # 10.6 SCREENSHOT
+    # ------------------------------------------------
+
+    print(
+        "\n[10.6] Taking screenshot..."
+    )
+
+    screenshot = (
+        "screenshots/authentication_test.png"
+    )
+
+    try:
+
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+
+        screenshots.append(
+            screenshot
+        )
+
+        print(
+            f"Screenshot saved : {screenshot}"
+        )
+
+    except Exception as e:
+
+        print(
+            "Screenshot failed"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+    # ------------------------------------------------
+    # 10.7 FINAL RESULT
+    # ------------------------------------------------
+
+    print("\n================================")
+
+    print(
+        f"Login Fields : "
+        f"{len(login_fields)}"
+    )
+
+    print(
+        f"Password Fields : "
+        f"{len(password_fields)}"
+    )
+
+    print(
+        f"Auth Buttons : "
+        f"{len(auth_buttons)}"
+    )
+
+    print(
+        f"Tested Features : "
+        f"{tested_features}"
+    )
+
+    print(
+        f"Passed Features : "
+        f"{passed_features}"
+    )
+
+    print(
+        f"Failed Features : "
+        f"{failed_features}"
+    )
+
+    print(
+        f"Module 10 Score : "
+        f"{module_score}%"
+    )
+
+    print(
+        f"Status : "
+        f"{status}"
+    )
+
+    print("================================")
+
+    print(
+        "========== AUTHENTICATION TEST END ==========\n"
+    )
+
+    # ------------------------------------------------
+    # RETURN RESULT
+    # ------------------------------------------------
+
+    return {
+
+        "module": "Authentication Testing",
+
+        "status": status,
+
+        "login_fields": len(login_fields),
+
+        "password_fields": len(password_fields),
+
+        "auth_buttons": len(auth_buttons),
+
+        "tested_features": tested_features,
+
+        "passed_features": passed_features,
+
+        "failed_features": failed_features,
+
+        "module_score": module_score,
+
+        "issues": issues,
+
+        "recommendations": recommendations,
+
+        "screenshots": screenshots,
+
+        "issue": issue,
+
+        "possible_reason": possible_reason,
+
+        "developer_action": developer_action
+
+    }
+
+    
+    
+    
 # ======================================
 # MODULE 11 : SESSION & COOKIES TEST
 # ======================================
@@ -3860,10 +5082,4356 @@ def accessibility_check(page):
             "Review accessibility module."
         )
 
-        return result   
+        return result  
     
-      
+# ----------------------------------------------------
+# MODULE 14 : SEO
+# ----------------------------------------------------
+def seo_test(page, url):
 
+    print("========== SEO TEST START ==========\n")
+
+    screenshots = []
+    issues = []
+    recommendations = []
+
+    try:
+
+        # ------------------------------------------------
+        # 14.1 PAGE CHECK
+        # ------------------------------------------------
+
+        print("[14.1] Checking current page...")
+
+        print(f"Current URL : {page.url}")
+        print("✅ Page available")
+
+        # ------------------------------------------------
+        # 14.2 GET RENDERED HTML
+        # ------------------------------------------------
+
+        print("\n[14.2] Reading rendered HTML...")
+
+        page.wait_for_timeout(3000)
+
+        html = page.content()
+
+        soup = BeautifulSoup(
+            html,
+            "html.parser"
+        )
+
+        # ------------------------------------------------
+        # 14.3 ROBOTS.TXT
+        # ------------------------------------------------
+
+        print("\n[14.3] Checking robots.txt...")
+
+        robots_exists = False
+        robots_has_sitemap = False
+
+        try:
+
+            robots_url = (
+                url.rstrip("/")
+                + "/robots.txt"
+            )
+
+            robots_response = requests.get(
+                robots_url,
+                timeout=10
+            )
+
+            robots_exists = (
+                robots_response.status_code == 200
+            )
+
+            if robots_exists:
+
+                robots_has_sitemap = (
+                    "sitemap:"
+                    in robots_response.text.lower()
+                )
+
+            print(
+                f"robots.txt : "
+                f"{robots_response.status_code}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"⚠️ robots.txt check failed : {e}"
+            )
+
+        # ------------------------------------------------
+        # 14.4 SITEMAP
+        # ------------------------------------------------
+
+        print("\n[14.4] Checking sitemap.xml...")
+
+        sitemap_exists = False
+
+        try:
+
+            sitemap_url = (
+                url.rstrip("/")
+                + "/sitemap.xml"
+            )
+
+            sitemap_response = requests.get(
+                sitemap_url,
+                timeout=10
+            )
+
+            sitemap_exists = (
+                sitemap_response.status_code == 200
+            )
+
+            print(
+                f"sitemap.xml : "
+                f"{sitemap_response.status_code}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"⚠️ Sitemap check failed : {e}"
+            )
+
+        # ------------------------------------------------
+        # 14.5 TITLE
+        # ------------------------------------------------
+
+        print("\n[14.5] Checking title...")
+
+        title_tag = soup.find("title")
+
+        title = ""
+
+        if title_tag:
+
+            title = title_tag.get_text(
+                strip=True
+            )
+
+        title_length = len(title)
+
+        print(
+            f"Title : {title}"
+        )
+
+        print(
+            f"Title Length : {title_length}"
+        )
+
+        if not title:
+
+            issues.append(
+                "Missing page title."
+            )
+
+        # ------------------------------------------------
+        # 14.6 META DESCRIPTION
+        # ------------------------------------------------
+
+        print(
+            "\n[14.6] Checking meta description..."
+        )
+
+        meta_description = soup.find(
+            "meta",
+            attrs={
+                "name": "description"
+            }
+        )
+
+        description = ""
+
+        if meta_description:
+
+            description = meta_description.get(
+                "content",
+                ""
+            ).strip()
+
+        description_length = len(
+            description
+        )
+
+        print(
+            f"Meta Description Found : "
+            f"{bool(description)}"
+        )
+
+        print(
+            f"Description Length : "
+            f"{description_length}"
+        )
+
+        if not description:
+
+            issues.append(
+                "Missing meta description."
+            )
+
+        # ------------------------------------------------
+        # 14.7 CANONICAL
+        # ------------------------------------------------
+
+        print("\n[14.7] Checking canonical URL...")
+
+        canonical = soup.find(
+            "link",
+            attrs={
+                "rel": "canonical"
+            }
+        )
+
+        canonical_exists = (
+            canonical is not None
+        )
+
+        canonical_url = ""
+
+        if canonical:
+
+            canonical_url = canonical.get(
+                "href",
+                ""
+            )
+
+        print(
+            f"Canonical : "
+            f"{canonical_exists}"
+        )
+
+        # ------------------------------------------------
+        # 14.8 VIEWPORT
+        # ------------------------------------------------
+
+        print(
+            "\n[14.8] Checking mobile viewport..."
+        )
+
+        viewport = soup.find(
+            "meta",
+            attrs={
+                "name": "viewport"
+            }
+        )
+
+        mobile_friendly = False
+
+        if viewport:
+
+            viewport_content = viewport.get(
+                "content",
+                ""
+            ).lower()
+
+            mobile_friendly = (
+                "width=device-width"
+                in viewport_content
+            )
+
+        print(
+            f"Mobile Viewport : "
+            f"{mobile_friendly}"
+        )
+
+        # ------------------------------------------------
+        # 14.9 LANGUAGE
+        # ------------------------------------------------
+
+        print("\n[14.9] Checking language tag...")
+
+        html_tag = soup.find("html")
+
+        language = ""
+
+        if html_tag:
+
+            language = html_tag.get(
+                "lang",
+                ""
+            )
+
+        lang_exists = bool(language)
+
+        print(
+            f"Language : "
+            f"{language if language else 'Missing'}"
+        )
+
+        # ------------------------------------------------
+        # 14.10 H1 / H2
+        # ------------------------------------------------
+
+        print("\n[14.10] Checking headings...")
+
+        h1_tags = soup.find_all("h1")
+        h2_tags = soup.find_all("h2")
+
+        h1_count = len(h1_tags)
+        h2_count = len(h2_tags)
+
+        h1_text = [
+            h.get_text(
+                " ",
+                strip=True
+            )
+            for h in h1_tags
+        ]
+
+        print(
+            f"H1 Count : {h1_count}"
+        )
+
+        print(
+            f"H2 Count : {h2_count}"
+        )
+
+        if h1_count == 0:
+
+            issues.append(
+                "No H1 heading found."
+            )
+
+        # ------------------------------------------------
+        # 14.11 FAVICON
+        # ------------------------------------------------
+
+        print("\n[14.11] Checking favicon...")
+
+        favicon = soup.find(
+            "link",
+            rel=lambda value:
+                value
+                and
+                any(
+                    "icon" in str(v).lower()
+                    for v in (
+                        value
+                        if isinstance(
+                            value,
+                            list
+                        )
+                        else [value]
+                    )
+                )
+        )
+
+        favicon_exists = (
+            favicon is not None
+        )
+
+        print(
+            f"Favicon : "
+            f"{favicon_exists}"
+        )
+
+        # ------------------------------------------------
+        # 14.12 OPEN GRAPH
+        # ------------------------------------------------
+
+        print(
+            "\n[14.12] Checking Open Graph..."
+        )
+
+        og_title = soup.find(
+            "meta",
+            property="og:title"
+        )
+
+        og_description = soup.find(
+            "meta",
+            property="og:description"
+        )
+
+        og_image = soup.find(
+            "meta",
+            property="og:image"
+        )
+
+        og_url = soup.find(
+            "meta",
+            property="og:url"
+        )
+
+        og_type = soup.find(
+            "meta",
+            property="og:type"
+        )
+
+        open_graph = {
+
+            "title": og_title is not None,
+
+            "description":
+                og_description is not None,
+
+            "image":
+                og_image is not None,
+
+            "url":
+                og_url is not None,
+
+            "type":
+                og_type is not None
+        }
+
+        print(
+            f"OG Title : "
+            f"{open_graph['title']}"
+        )
+
+        print(
+            f"OG Description : "
+            f"{open_graph['description']}"
+        )
+
+        print(
+            f"OG Image : "
+            f"{open_graph['image']}"
+        )
+
+        # ------------------------------------------------
+        # 14.13 TWITTER CARD
+        # ------------------------------------------------
+
+        print(
+            "\n[14.13] Checking Twitter Card..."
+        )
+
+        twitter_card = soup.find(
+            "meta",
+            attrs={
+                "name": "twitter:card"
+            }
+        )
+
+        twitter_exists = (
+            twitter_card is not None
+        )
+
+        print(
+            f"Twitter Card : "
+            f"{twitter_exists}"
+        )
+
+        # ------------------------------------------------
+        # 14.14 STRUCTURED DATA
+        # ------------------------------------------------
+
+        print(
+            "\n[14.14] Checking structured data..."
+        )
+
+        schema_scripts = soup.find_all(
+            "script",
+            attrs={
+                "type":
+                "application/ld+json"
+            }
+        )
+
+        structured_data = (
+            len(schema_scripts) > 0
+        )
+
+        schema_types = []
+
+        for script in schema_scripts:
+
+            text = script.get_text(
+                strip=True
+            )
+
+            if "Organization" in text:
+
+                schema_types.append(
+                    "Organization"
+                )
+
+            if "Product" in text:
+
+                schema_types.append(
+                    "Product"
+                )
+
+            if "Article" in text:
+
+                schema_types.append(
+                    "Article"
+                )
+
+            if "BreadcrumbList" in text:
+
+                schema_types.append(
+                    "BreadcrumbList"
+                )
+
+            if "FAQPage" in text:
+
+                schema_types.append(
+                    "FAQPage"
+                )
+
+        schema_types = list(
+            set(schema_types)
+        )
+
+        print(
+            f"Structured Data : "
+            f"{structured_data}"
+        )
+
+        print(
+            f"Schema Types : "
+            f"{schema_types}"
+        )
+
+        # ------------------------------------------------
+        # 14.15 IMAGE SEO
+        # ------------------------------------------------
+
+        print(
+            "\n[14.15] Checking image SEO..."
+        )
+
+        images = soup.find_all("img")
+
+        total_images = len(images)
+
+        missing_alt = 0
+        lazy_loaded = 0
+        missing_dimensions = 0
+
+        for img in images:
+
+            if not img.get("alt"):
+
+                missing_alt += 1
+
+            if (
+                img.get("loading") == "lazy"
+                or img.get("data-src")
+                or img.get("data-lazy-src")
+            ):
+
+                lazy_loaded += 1
+
+            if (
+                not img.get("width")
+                or
+                not img.get("height")
+            ):
+
+                missing_dimensions += 1
+
+        print(
+            f"Total Images : "
+            f"{total_images}"
+        )
+
+        print(
+            f"Missing Alt : "
+            f"{missing_alt}"
+        )
+
+        print(
+            f"Lazy Loaded : "
+            f"{lazy_loaded}"
+        )
+
+        print(
+            f"Missing Dimensions : "
+            f"{missing_dimensions}"
+        )
+
+        if (
+            total_images > 0
+            and
+            missing_alt > 0
+        ):
+
+            issues.append(
+                f"{missing_alt} image(s) missing alt text."
+            )
+
+        # ------------------------------------------------
+        # 14.16 SEO SCORE
+        # ------------------------------------------------
+
+        print(
+            "\n[14.16] Calculating SEO score..."
+        )
+
+        score = 0
+
+        if robots_exists:
+            score += 10
+
+        if sitemap_exists:
+            score += 10
+
+        if title:
+            score += 10
+
+        if description:
+            score += 10
+
+        if canonical_exists:
+            score += 10
+
+        if favicon_exists:
+            score += 5
+
+        if open_graph["title"]:
+            score += 5
+
+        if open_graph["description"]:
+            score += 5
+
+        if open_graph["image"]:
+            score += 5
+
+        if twitter_exists:
+            score += 5
+
+        if structured_data:
+            score += 10
+
+        if mobile_friendly:
+            score += 5
+
+        if lang_exists:
+            score += 5
+
+        if h1_count > 0:
+            score += 5
+
+        if (
+            total_images == 0
+            or
+            missing_alt == 0
+        ):
+
+            score += 5
+
+        score = min(
+            score,
+            100
+        )
+
+        # ------------------------------------------------
+        # 14.17 SCREENSHOT
+        # ------------------------------------------------
+
+        print(
+            "\n[14.17] Taking screenshot..."
+        )
+
+        screenshot = (
+            "screenshots/seo_test.png"
+        )
+
+        try:
+
+            page.screenshot(
+                path=screenshot,
+                full_page=True
+            )
+
+            screenshots.append(
+                screenshot
+            )
+
+            print(
+                f"Screenshot saved : "
+                f"{screenshot}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"⚠️ Screenshot failed : {e}"
+            )
+
+        # ------------------------------------------------
+        # 14.18 FINAL STATUS
+        # ------------------------------------------------
+
+        if score >= 80:
+
+            status = "PASS"
+
+        elif score >= 60:
+
+            status = "PARTIAL"
+
+        else:
+
+            status = "FAIL"
+
+        recommendations = []
+
+        if not robots_exists:
+
+            recommendations.append(
+                "Add robots.txt."
+            )
+
+        if not sitemap_exists:
+
+            recommendations.append(
+                "Add sitemap.xml."
+            )
+
+        if not title:
+
+            recommendations.append(
+                "Add a proper page title."
+            )
+
+        if not description:
+
+            recommendations.append(
+                "Add meta description."
+            )
+
+        if not canonical_exists:
+
+            recommendations.append(
+                "Add canonical URL."
+            )
+
+        if not mobile_friendly:
+
+            recommendations.append(
+                "Add mobile viewport configuration."
+            )
+
+        if not lang_exists:
+
+            recommendations.append(
+                "Add HTML language attribute."
+            )
+
+        if h1_count == 0:
+
+            recommendations.append(
+                "Add an H1 heading."
+            )
+
+        if (
+            total_images > 0
+            and
+            missing_alt > 0
+        ):
+
+            recommendations.append(
+                "Add alt text to images."
+            )
+
+        print("\n================================")
+        print(
+            f"SEO Score : {score}%"
+        )
+        print(
+            f"Status : {status}"
+        )
+        print("================================")
+
+        print(
+            "========== SEO TEST END ==========\n"
+        )
+
+        return {
+
+            "module": "SEO",
+
+            "status": status,
+
+            "seo_score": score,
+
+            "robots_txt": robots_exists,
+
+            "robots_has_sitemap":
+                robots_has_sitemap,
+
+            "sitemap_xml":
+                sitemap_exists,
+
+            "title": title,
+
+            "title_length":
+                title_length,
+
+            "meta_description":
+                bool(description),
+
+            "description_length":
+                description_length,
+
+            "canonical":
+                canonical_exists,
+
+            "canonical_url":
+                canonical_url,
+
+            "favicon":
+                favicon_exists,
+
+            "open_graph":
+                open_graph,
+
+            "twitter_card":
+                twitter_exists,
+
+            "structured_data":
+                structured_data,
+
+            "schema_types":
+                schema_types,
+
+            "mobile_friendly":
+                mobile_friendly,
+
+            "language":
+                language,
+
+            "lang_tag":
+                lang_exists,
+
+            "h1_count":
+                h1_count,
+
+            "h2_count":
+                h2_count,
+
+            "h1_text":
+                h1_text,
+
+            "image_seo": {
+
+                "total_images":
+                    total_images,
+
+                "missing_alt":
+                    missing_alt,
+
+                "lazy_loaded":
+                    lazy_loaded,
+
+                "missing_dimensions":
+                    missing_dimensions
+            },
+
+            "issues":
+                issues,
+
+            "recommendations":
+                recommendations,
+
+            "screenshots":
+                screenshots,
+
+            "issue":
+                "; ".join(issues),
+
+            "possible_reason":
+                (
+                    "One or more SEO checks "
+                    "did not meet the expected criteria."
+                    if issues
+                    else ""
+                ),
+
+            "developer_action":
+                (
+                    "Review and fix the reported SEO issues."
+                    if issues
+                    else ""
+                )
+        }
+
+    except Exception as e:
+
+        print(
+            "\n❌ SEO MODULE ERROR"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+        return {
+
+            "module": "SEO",
+
+            "status": "FAIL",
+
+            "seo_score": 0,
+
+            "issues": [
+                str(e)
+            ],
+
+            "recommendations": [
+                "Review SEO module execution."
+            ],
+
+            "screenshots":
+                screenshots,
+
+            "issue":
+                str(e),
+
+            "possible_reason":
+                "SEO validation failed during execution.",
+
+            "developer_action":
+                "Review SEO test implementation."
+        }
+            
+# ----------------------------------------------------
+# MODULE 15 : RESPONSIVE DESIGN TEST
+# ----------------------------------------------------
+
+def responsive_test(page):
+
+    print("========== RESPONSIVE TEST START ==========\n")
+
+    devices = [
+        {"name": "Desktop", "width": 1366, "height": 768},
+        {"name": "Tablet", "width": 768, "height": 1024},
+        {"name": "Mobile", "width": 390, "height": 844}
+    ]
+
+    issues = []
+    screenshots = []
+    passed = 0
+    failed = 0
+
+    for device in devices:
+
+        print("--------------------------------")
+        print(f"Testing : {device['name']}")
+
+        page.set_viewport_size({
+            "width": device["width"],
+            "height": device["height"]
+        })
+
+        page.reload()
+        page.wait_for_load_state("networkidle")
+
+        screenshot = f"screenshots/{device['name'].lower()}_responsive.png"
+
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+
+        screenshots.append(screenshot)
+
+        body = page.locator("body")
+        box = body.bounding_box()
+
+        if box:
+            width = box["width"]
+        else:
+            width = device["width"]
+
+        print(f"Viewport Width : {device['width']}")
+        print(f"Body Width     : {width}")
+
+        if width > device["width"] + 20:
+            print("❌ Overflow Found")
+            issues.append(
+                f"{device['name']} layout overflow detected."
+            )
+            failed += 1
+        else:
+            print("✅ Responsive")
+            passed += 1
+
+    score = int((passed / len(devices)) * 100)
+    status = "PASS"
+
+    if issues:
+        status = "FAIL"
+
+    print("\n================================")
+    print(f"Passed Devices : {passed}")
+    print(f"Failed Devices : {failed}")
+    print(f"Responsive Score : {score}%")
+    print("================================")
+    print("========== RESPONSIVE TEST END ==========\n")
+
+    return {
+        "module": "Responsive Design",
+        "status": status,
+        "responsive_score": score,
+        "devices_tested": len(devices),
+        "passed_devices": passed,
+        "failed_devices": failed,
+        "issues": issues,
+        "recommendations": [
+            "Ensure website adapts correctly to Desktop, Tablet and Mobile."
+        ] if issues else [
+            "Website is responsive across all tested devices."
+        ],
+        "screenshots": screenshots,
+        "issue": (
+            "Responsive issues found."
+            if issues else
+            "Responsive design verified."
+        ),
+        "possible_reason": (
+            "CSS media queries or layout overflow."
+            if issues else ""
+        ),
+        "developer_action": (
+            "Review CSS responsiveness."
+            if issues else ""
+        )
+    }     
+  
+# ----------------------------------------------------
+# MODULE 18 : SECURITY HEADERS
+# ----------------------------------------------------  
+def security_headers_test(page, url):
+
+    print("========== SECURITY HEADERS TEST START ==========\n")
+
+    screenshots = []
+    issues = []
+    recommendations = []
+
+    # ------------------------------------------------
+    # 16.1 PAGE CHECK
+    # ------------------------------------------------
+
+    print("[16.1] Checking current page...")
+
+    try:
+
+        print(f"Current URL : {page.url}")
+        print("✅ Page available")
+
+    except Exception as e:
+
+        print("❌ Page check failed")
+        print(f"Error : {e}")
+
+        return {
+            "module": "Security Headers",
+            "status": "FAIL",
+            "security_score": 0,
+            "total_headers": 0,
+            "passed_headers": 0,
+            "failed_headers": 0,
+            "headers": {},
+            "issues": [str(e)],
+            "recommendations": [
+                "Verify website availability."
+            ],
+            "screenshots": [],
+            "issue": str(e),
+            "possible_reason": "Page could not be accessed.",
+            "developer_action": "Review Playwright logs."
+        }
+
+    # ------------------------------------------------
+    # 16.2 GET RESPONSE HEADERS
+    # ------------------------------------------------
+
+    print("\n[16.2] Fetching HTTP response headers...")
+
+    response = None
+
+    try:
+
+        response = page.request.get(
+            url,
+            timeout=60000
+        )
+
+        print(
+            f"HTTP Status : {response.status}"
+        )
+
+        print("✅ Response received")
+
+    except Exception as e:
+
+        print("❌ Unable to fetch response headers")
+        print(f"Error : {e}")
+
+        return {
+            "module": "Security Headers",
+            "status": "FAIL",
+            "security_score": 0,
+            "total_headers": 0,
+            "passed_headers": 0,
+            "failed_headers": 0,
+            "headers": {},
+            "issues": [str(e)],
+            "recommendations": [
+                "Verify the website URL and server response."
+            ],
+            "screenshots": [],
+            "issue": str(e),
+            "possible_reason": "HTTP response could not be obtained.",
+            "developer_action": "Check server/network configuration."
+        }
+
+    # ------------------------------------------------
+    # 16.3 SECURITY HEADER CHECK
+    # ------------------------------------------------
+
+    print("\n[16.3] Checking security headers...")
+
+    response_headers = response.headers
+
+    # Convert headers to lowercase for reliable checking
+    headers_lower = {
+        key.lower(): value
+        for key, value in response_headers.items()
+    }
+
+    security_headers = {
+
+        "Strict-Transport-Security":
+            "strict-transport-security",
+
+        "Content-Security-Policy":
+            "content-security-policy",
+
+        "X-Content-Type-Options":
+            "x-content-type-options",
+
+        "X-Frame-Options":
+            "x-frame-options",
+
+        "Referrer-Policy":
+            "referrer-policy",
+
+        "Permissions-Policy":
+            "permissions-policy"
+
+    }
+
+    passed_headers = 0
+    failed_headers = 0
+
+    header_results = {}
+
+    for display_name, header_name in security_headers.items():
+
+        value = headers_lower.get(
+            header_name
+        )
+
+        print("--------------------------------")
+
+        print(
+            f"Header : {display_name}"
+        )
+
+        if value:
+
+            print(
+                f"Value  : {value}"
+            )
+
+            print("✅ PRESENT")
+
+            passed_headers += 1
+
+            header_results[display_name] = {
+                "present": True,
+                "value": value,
+                "status": "PASS"
+            }
+
+        else:
+
+            print("❌ MISSING")
+
+            failed_headers += 1
+
+            header_results[display_name] = {
+                "present": False,
+                "value": "",
+                "status": "FAIL"
+            }
+
+            issues.append(
+                f"{display_name} header is missing."
+            )
+
+            recommendations.append(
+                f"Add {display_name} security header."
+            )
+
+    # ------------------------------------------------
+    # 16.4 CALCULATE SCORE
+    # ------------------------------------------------
+
+    print(
+        "\n[16.4] Calculating security header score..."
+    )
+
+    total_headers = len(
+        security_headers
+    )
+
+    if total_headers > 0:
+
+        security_score = int(
+            (
+                passed_headers /
+                total_headers
+            ) * 100
+        )
+
+    else:
+
+        security_score = 0
+
+    # ------------------------------------------------
+    # 16.5 STATUS
+    # ------------------------------------------------
+
+    if passed_headers == total_headers:
+
+        status = "PASS"
+
+        issue = ""
+
+        possible_reason = ""
+
+        developer_action = ""
+
+    elif passed_headers > 0:
+
+        status = "PARTIAL"
+
+        issue = (
+            f"{failed_headers} security header(s) "
+            "are missing."
+        )
+
+        possible_reason = (
+            "Some recommended security headers "
+            "are not configured on the server."
+        )
+
+        developer_action = (
+            "Configure the missing security headers "
+            "in the web server, reverse proxy, "
+            "or application backend."
+        )
+
+    else:
+
+        status = "FAIL"
+
+        issue = (
+            "All checked security headers are missing."
+        )
+
+        possible_reason = (
+            "Security headers are not configured "
+            "on the website response."
+        )
+
+        developer_action = (
+            "Configure security headers on the "
+            "server or reverse proxy."
+        )
+
+    # ------------------------------------------------
+    # 16.6 SCREENSHOT
+    # ------------------------------------------------
+
+    print(
+        "\n[16.6] Taking screenshot..."
+    )
+
+    screenshot = (
+        "screenshots/security_headers_test.png"
+    )
+
+    try:
+
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+
+        screenshots.append(
+            screenshot
+        )
+
+        print(
+            f"✅ Screenshot saved : {screenshot}"
+        )
+
+    except Exception as e:
+
+        print("⚠️ Screenshot failed")
+        print(f"Error : {e}")
+
+    # ------------------------------------------------
+    # 16.7 FINAL RESULT
+    # ------------------------------------------------
+
+    print("\n================================")
+
+    print(
+        f"Total Headers  : {total_headers}"
+    )
+
+    print(
+        f"Passed Headers : {passed_headers}"
+    )
+
+    print(
+        f"Failed Headers : {failed_headers}"
+    )
+
+    print(
+        f"Security Score : {security_score}%"
+    )
+
+    print(
+        f"Status         : {status}"
+    )
+
+    print("================================")
+
+    print(
+        "========== SECURITY HEADERS TEST END ==========\n"
+    )
+
+    # ------------------------------------------------
+    # RETURN RESULT
+    # ------------------------------------------------
+
+    return {
+
+        "module": "Security Headers",
+
+        "status": status,
+
+        "security_score": security_score,
+
+        "total_headers": total_headers,
+
+        "passed_headers": passed_headers,
+
+        "failed_headers": failed_headers,
+
+        "headers": header_results,
+
+        "issues": issues,
+
+        "recommendations": recommendations,
+
+        "screenshots": screenshots,
+
+        "issue": issue,
+
+        "possible_reason": possible_reason,
+
+        "developer_action": developer_action
+
+    }  
+# ----------------------------------------------------
+# MODULE 17 : CONSOLE ERROR DETECTION
+# ----------------------------------------------------
+
+def console_error_detection(page):
+
+    print("========== CONSOLE ERROR TEST START ==========\n")
+
+    console_errors = []
+
+    def handle_console(msg):
+
+        if msg.type == "error":
+            console_errors.append(msg.text)
+
+    page.on("console", handle_console)
+
+    page.reload(
+        wait_until="domcontentloaded",
+        timeout=60000
+    )
+
+    page.wait_for_timeout(3000)
+
+    screenshot = "screenshots/console_error_test.png"
+
+    current_page = locals().get("page")
+
+    if current_page is None:
+        raise RuntimeError("API validation page is not available")
+
+    current_page.screenshot(
+        path=screenshot,
+        full_page=True
+    )
+
+    if len(console_errors) == 0:
+
+        status = "PASS"
+
+        recommendations = [
+            "No JavaScript console errors detected."
+        ]
+
+        issue = ""
+        possible_reason = ""
+        developer_action = ""
+
+    else:
+
+        status = "FAIL"
+
+        recommendations = [
+            "Fix JavaScript console errors."
+        ]
+
+        issue = f"{len(console_errors)} console error(s) found."
+
+        possible_reason = (
+            "JavaScript runtime errors or missing resources."
+        )
+
+        developer_action = (
+            "Review browser console and fix JavaScript issues."
+        )
+
+    print("--------------------------------")
+    print(f"Console Errors : {len(console_errors)}")
+
+    for error in console_errors:
+        print(error)
+
+    print("--------------------------------")
+    print(f"Status : {status}")
+
+    print("========== CONSOLE ERROR TEST END ==========\n")
+
+    return {
+
+        "module": "Console Error Detection",
+
+        "status": status,
+
+        "console_error_count": len(console_errors),
+
+        "issues": console_errors,
+
+        "recommendations": recommendations,
+
+        "screenshots": [
+            screenshot
+        ],
+
+        "issue": issue,
+
+        "possible_reason": possible_reason,
+
+        "developer_action": developer_action
+
+    } 
+    
+# ----------------------------------------------------
+# MODULE 18 : BROKEN RESOURCES
+# ----------------------------------------------------
+
+def broken_resources_test(page):
+
+    print("========== BROKEN RESOURCES TEST START ==========\n")
+
+    broken_resources = []
+    checked_resources = set()
+
+    def handle_response(response):
+
+        try:
+            status = response.status
+
+            # Check only failed HTTP resources
+            if status >= 400:
+
+                resource_url = response.url
+
+                # Avoid duplicate resources
+                if resource_url not in checked_resources:
+
+                    checked_resources.add(resource_url)
+
+                    broken_resources.append({
+                        "url": resource_url,
+                        "status_code": status,
+                        "resource_type": response.request.resource_type
+                    })
+
+        except Exception:
+            pass
+
+    # Listen to all network responses
+    page.on("response", handle_response)
+
+    try:
+
+        # Reload current website
+        page.reload(
+            wait_until="domcontentloaded",
+            timeout=60000
+        )
+
+        # Give resources time to load
+        page.wait_for_timeout(5000)
+
+    except Exception as e:
+
+        print("❌ Page loading error")
+        print(e)
+
+        broken_resources.append({
+            "url": page.url,
+            "status_code": 0,
+            "resource_type": "page",
+            "error": str(e)
+        })
+
+    screenshot = "screenshots/broken_resources_test.png"
+
+    try:
+
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+
+    except Exception:
+        screenshot = ""
+
+    # -----------------------------------------
+    # Result
+    # -----------------------------------------
+
+    broken_count = len(broken_resources)
+
+    if broken_count == 0:
+
+        status = "PASS"
+
+        recommendations = [
+            "No broken resources detected."
+        ]
+
+        issue = ""
+        possible_reason = ""
+        developer_action = ""
+
+    else:
+
+        status = "FAIL"
+
+        recommendations = [
+            "Fix broken images, CSS, JavaScript, or other failed resources."
+        ]
+
+        issue = (
+            f"{broken_count} broken resource(s) detected."
+        )
+
+        possible_reason = (
+            "Some website resources returned HTTP errors."
+        )
+
+        developer_action = (
+            "Check the failed resource URLs and fix missing or invalid files."
+        )
+
+    # -----------------------------------------
+    # Print Results
+    # -----------------------------------------
+
+    print("--------------------------------")
+    print(f"Broken Resources : {broken_count}")
+
+    for resource in broken_resources:
+
+        print(
+            f"❌ {resource.get('status_code')} "
+            f"| {resource.get('resource_type')} "
+            f"| {resource.get('url')}"
+        )
+
+    print("--------------------------------")
+    print(f"Status : {status}")
+    print("========== BROKEN RESOURCES TEST END ==========\n")
+
+    return {
+
+        "module": "Broken Resources",
+
+        "status": status,
+
+        "broken_resource_count": broken_count,
+
+        "broken_resources": broken_resources,
+
+        "issues": [
+            resource.get("url", "")
+            for resource in broken_resources
+        ],
+
+        "recommendations": recommendations,
+
+        "screenshots": [
+            screenshot
+        ] if screenshot else [],
+
+        "issue": issue,
+
+        "possible_reason": possible_reason,
+
+        "developer_action": developer_action
+
+    }  
+    
+
+# ----------------------------------------------------
+# MODULE 19 : DOWNLOAD / UPLOAD TESTING
+# ----------------------------------------------------
+
+def download_upload_test(page):
+
+    print("========== DOWNLOAD / UPLOAD TEST START ==========\n")
+
+    issues = []
+    screenshots = []
+
+    download_passed = 0
+    download_failed = 0
+
+    upload_passed = 0
+    upload_failed = 0
+
+    download_elements = []
+    upload_elements = []
+
+    # ------------------------------------------------
+    # 19.1 PAGE CHECK
+    # ------------------------------------------------
+
+    print("[19.1] Checking current page...")
+
+    try:
+
+        print(f"Current URL : {page.url}")
+        print("Page available")
+
+    except Exception as e:
+
+        print("Page check failed")
+        print(f"Error : {e}")
+
+        return {
+            "module": "Download / Upload Testing",
+            "status": "FAIL",
+            "download_count": 0,
+            "download_passed": 0,
+            "download_failed": 1,
+            "upload_count": 0,
+            "upload_passed": 0,
+            "upload_failed": 0,
+            "tested_features": 1,
+            "passed_features": 0,
+            "failed_features": 1,
+            "module_score": 0,
+            "issues": [str(e)],
+            "recommendations": [
+                "Verify website availability."
+            ],
+            "screenshots": [],
+            "issue": str(e),
+            "possible_reason": "Page could not be accessed.",
+            "developer_action": "Review Playwright logs."
+        }
+
+    # ------------------------------------------------
+    # 19.2 SEARCH DOWNLOAD LINKS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.2] Searching all links for download functionality..."
+    )
+
+    try:
+
+        links = page.locator("a")
+
+        total_links = links.count()
+
+        print(
+            f"Total links found : {total_links}"
+        )
+
+        download_extensions = [
+            ".pdf",
+            ".csv",
+            ".xlsx",
+            ".xls",
+            ".doc",
+            ".docx",
+            ".zip",
+            ".txt",
+            ".json",
+            ".xml",
+            ".ppt",
+            ".pptx"
+        ]
+
+        download_keywords = [
+            "download",
+            "export"
+        ]
+
+        for i in range(total_links):
+
+            try:
+
+                link = links.nth(i)
+
+                if not link.is_visible():
+                    continue
+
+                href = link.get_attribute("href")
+
+                text = link.inner_text(
+                    timeout=3000
+                ).strip()
+
+                download_attribute = link.get_attribute(
+                    "download"
+                )
+
+                href_lower = (
+                    href.lower()
+                    if href
+                    else ""
+                )
+
+                text_lower = text.lower()
+
+                is_download = False
+
+                if download_attribute is not None:
+                    is_download = True
+
+                if any(
+                    extension in href_lower
+                    for extension in download_extensions
+                ):
+                    is_download = True
+
+                if any(
+                    keyword in text_lower
+                    for keyword in download_keywords
+                ):
+                    is_download = True
+
+                if is_download:
+
+                    download_elements.append({
+                        "type": "link",
+                        "index": i,
+                        "text": text or f"Download Link {i + 1}",
+                        "href": href
+                    })
+
+                    print("--------------------------------")
+                    print(
+                        f"Download found : "
+                        f"{text or 'Unnamed Link'}"
+                    )
+                    print(
+                        f"Href : {href}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"Download link {i + 1} skipped : {e}"
+                )
+
+    except Exception as e:
+
+        print("Download link scan failed")
+        print(f"Error : {e}")
+
+        issues.append(
+            f"Download scan failed: {str(e)}"
+        )
+
+    # ------------------------------------------------
+    # 19.3 SEARCH DOWNLOAD BUTTONS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.3] Searching buttons for download/export..."
+    )
+
+    try:
+
+        buttons = page.locator(
+            "button:visible, "
+            "input[type='button']:visible, "
+            "input[type='submit']:visible"
+        )
+
+        total_buttons = buttons.count()
+
+        print(
+            f"Total visible buttons found : {total_buttons}"
+        )
+
+        for i in range(total_buttons):
+
+            try:
+
+                button = buttons.nth(i)
+
+                text = button.inner_text(
+                    timeout=3000
+                ).strip()
+
+                text_lower = text.lower()
+
+                if any(
+                    keyword in text_lower
+                    for keyword in [
+                        "download",
+                        "export"
+                    ]
+                ):
+
+                    download_elements.append({
+                        "type": "button",
+                        "index": i,
+                        "text": text or f"Download Button {i + 1}",
+                        "href": None
+                    })
+
+                    print(
+                        f"Download button found : "
+                        f"{text or 'Unnamed Button'}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"Download button {i + 1} skipped : {e}"
+                )
+
+    except Exception as e:
+
+        print("Download button scan failed")
+        print(f"Error : {e}")
+
+    # ------------------------------------------------
+    # 19.4 TEST DOWNLOADS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.4] Testing detected download elements..."
+    )
+
+    print(
+        f"Download elements detected : "
+        f"{len(download_elements)}"
+    )
+
+    for item in download_elements:
+
+        print("--------------------------------")
+
+        print(
+            f"Testing download : "
+            f"{item['text']}"
+        )
+
+        try:
+
+            if item["type"] == "link":
+
+                locator = page.locator("a").nth(
+                    item["index"]
+                )
+
+            else:
+
+                locator = buttons.nth(
+                    item["index"]
+                )
+
+            with page.expect_download(
+                timeout=10000
+            ) as download_info:
+
+                locator.click(
+                    timeout=10000
+                )
+
+            download = download_info.value
+
+            print(
+                f"Downloaded file : "
+                f"{download.suggested_filename}"
+            )
+
+            print("Download PASS")
+
+            download_passed += 1
+
+        except Exception as e:
+
+            print("Download FAIL")
+            print(f"Error : {e}")
+
+            download_failed += 1
+
+            issues.append(
+                f"Download failed: {item['text']}"
+            )
+
+    # ------------------------------------------------
+    # 19.5 SEARCH UPLOAD INPUTS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.5] Searching upload functionality..."
+    )
+
+    try:
+
+        file_inputs = page.locator(
+            "input[type='file']"
+        )
+
+        total_file_inputs = file_inputs.count()
+
+        print(
+            f"File input fields found : "
+            f"{total_file_inputs}"
+        )
+
+        for i in range(total_file_inputs):
+
+            try:
+
+                field = file_inputs.nth(i)
+
+                upload_elements.append({
+                    "type": "file_input",
+                    "index": i
+                })
+
+                print(
+                    f"Upload field detected : "
+                    f"{i + 1}"
+                )
+
+            except Exception as e:
+
+                print(
+                    f"Upload field {i + 1} skipped : {e}"
+                )
+
+    except Exception as e:
+
+        print("Upload field scan failed")
+        print(f"Error : {e}")
+
+    # ------------------------------------------------
+    # 19.6 SEARCH UPLOAD BUTTONS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.6] Searching upload/import buttons..."
+    )
+
+    try:
+
+        upload_buttons = page.locator(
+            "button:visible, "
+            "input[type='button']:visible, "
+            "input[type='submit']:visible"
+        )
+
+        total_upload_buttons = upload_buttons.count()
+
+        print(
+            f"Buttons checked for upload : "
+            f"{total_upload_buttons}"
+        )
+
+        for i in range(total_upload_buttons):
+
+            try:
+
+                button = upload_buttons.nth(i)
+
+                text = button.inner_text(
+                    timeout=3000
+                ).strip()
+
+                text_lower = text.lower()
+
+                if any(
+                    keyword in text_lower
+                    for keyword in [
+                        "upload",
+                        "import",
+                        "attach",
+                        "choose file",
+                        "select file"
+                    ]
+                ):
+
+                    upload_elements.append({
+                        "type": "upload_button",
+                        "index": i,
+                        "text": text or f"Upload Button {i + 1}"
+                    })
+
+                    print(
+                        f"Upload button found : "
+                        f"{text or 'Unnamed Button'}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"Upload button {i + 1} skipped : {e}"
+                )
+
+    except Exception as e:
+
+        print("Upload button scan failed")
+        print(f"Error : {e}")
+
+    # ------------------------------------------------
+    # 19.7 VALIDATE UPLOAD FIELDS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.7] Validating upload fields..."
+    )
+
+    for item in upload_elements:
+
+        if item["type"] != "file_input":
+            continue
+
+        try:
+
+            field = page.locator(
+                "input[type='file']"
+            ).nth(
+                item["index"]
+            )
+
+            visible = field.is_visible()
+
+            enabled = field.is_enabled()
+
+            print(
+                f"Upload field "
+                f"{item['index'] + 1} "
+                f"| Visible : {visible} "
+                f"| Enabled : {enabled}"
+            )
+
+            if visible and enabled:
+
+                print("Upload field PASS")
+
+                upload_passed += 1
+
+            else:
+
+                print("Upload field FAIL")
+
+                upload_failed += 1
+
+                issues.append(
+                    f"Upload field {item['index'] + 1} is not usable."
+                )
+
+        except Exception as e:
+
+            print("Upload validation failed")
+            print(f"Error : {e}")
+
+            upload_failed += 1
+
+            issues.append(
+                f"Upload validation failed: {str(e)}"
+            )
+
+    # ------------------------------------------------
+    # 19.8 SCREENSHOT
+    # ------------------------------------------------
+
+    print(
+        "\n[19.8] Taking screenshot..."
+    )
+
+    screenshot = (
+        "screenshots/download_upload_test.png"
+    )
+
+    try:
+
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+
+        screenshots.append(
+            screenshot
+        )
+
+        print(
+            f"Screenshot saved : {screenshot}"
+        )
+
+    except Exception as e:
+
+        print(
+            "Screenshot failed"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+    # ------------------------------------------------
+    # 19.9 CALCULATE RESULTS
+    # ------------------------------------------------
+
+    print(
+        "\n[19.9] Calculating results..."
+    )
+
+    download_count = len(
+        download_elements
+    )
+
+    upload_count = len(
+        upload_elements
+    )
+
+    passed_features = (
+        download_passed +
+        upload_passed
+    )
+
+    failed_features = (
+        download_failed +
+        upload_failed
+    )
+
+    tested_features = (
+        passed_features +
+        failed_features
+    )
+
+    print("--------------------------------")
+
+    print(
+        f"Download Count : "
+        f"{download_count}"
+    )
+
+    print(
+        f"Download Passed : "
+        f"{download_passed}"
+    )
+
+    print(
+        f"Download Failed : "
+        f"{download_failed}"
+    )
+
+    print("--------------------------------")
+
+    print(
+        f"Upload Count : "
+        f"{upload_count}"
+    )
+
+    print(
+        f"Upload Passed : "
+        f"{upload_passed}"
+    )
+
+    print(
+        f"Upload Failed : "
+        f"{upload_failed}"
+    )
+
+    print("--------------------------------")
+
+    print(
+        f"Tested Features : "
+        f"{tested_features}"
+    )
+
+    print(
+        f"Passed Features : "
+        f"{passed_features}"
+    )
+
+    print(
+        f"Failed Features : "
+        f"{failed_features}"
+    )
+
+    # ------------------------------------------------
+    # IMPORTANT:
+    # NO FEATURE = PASS
+    # ------------------------------------------------
+
+    if tested_features == 0:
+
+        status = "PASS"
+
+        module_score = 100
+
+        issues = []
+
+        recommendations = [
+            "No download or upload functionality was detected.",
+            "Module passed because there were no download/upload features available to fail."
+        ]
+
+        issue = ""
+
+        possible_reason = (
+            "The current webpage does not contain "
+            "download or upload functionality."
+        )
+
+        developer_action = (
+            "No action required unless the webpage "
+            "is expected to provide download/upload functionality."
+        )
+
+        print(
+            "No download/upload functionality detected."
+        )
+
+        print(
+            "Module treated as PASS because "
+            "there was no functionality to test."
+        )
+
+    # ------------------------------------------------
+    # FAIL
+    # ------------------------------------------------
+
+    elif failed_features > 0:
+
+        status = "FAIL"
+
+        module_score = int(
+            (
+                passed_features /
+                tested_features
+            ) * 100
+        )
+
+        recommendations = [
+            "Fix failed download/upload functionality.",
+            "Verify download links and upload controls.",
+            "Check frontend event handlers."
+        ]
+
+        issue = (
+            f"{failed_features} "
+            "download/upload feature(s) failed."
+        )
+
+        possible_reason = (
+            "Detected download/upload functionality "
+            "did not work correctly."
+        )
+
+        developer_action = (
+            "Review failed download/upload elements "
+            "and their event handlers."
+        )
+
+    # ------------------------------------------------
+    # PASS
+    # ------------------------------------------------
+
+    else:
+
+        status = "PASS"
+
+        module_score = 100
+
+        recommendations = [
+            "All detected download/upload "
+            "features passed successfully."
+        ]
+
+        issue = ""
+
+        possible_reason = ""
+
+        developer_action = ""
+
+    # ------------------------------------------------
+    # 19.10 FINAL OUTPUT
+    # ------------------------------------------------
+
+    print("--------------------------------")
+
+    print(
+        f"Module 19 Score : "
+        f"{module_score}%"
+    )
+
+    print(
+        f"Status : "
+        f"{status}"
+    )
+
+    print("--------------------------------")
+
+    print(
+        "========== DOWNLOAD / UPLOAD TEST END ==========\n"
+    )
+
+    # ------------------------------------------------
+    # RETURN RESULT
+    # ------------------------------------------------
+
+    return {
+
+        "module": "Download / Upload Testing",
+
+        "status": status,
+
+        "download_count": download_count,
+
+        "download_passed": download_passed,
+
+        "download_failed": download_failed,
+
+        "upload_count": upload_count,
+
+        "upload_passed": upload_passed,
+
+        "upload_failed": upload_failed,
+
+        "tested_features": tested_features,
+
+        "passed_features": passed_features,
+
+        "failed_features": failed_features,
+
+        "module_score": module_score,
+
+        "issues": issues,
+
+        "recommendations": recommendations,
+
+        "screenshots": screenshots,
+
+        "issue": issue,
+
+        "possible_reason": possible_reason,
+
+        "developer_action": developer_action
+
+    }
+
+# ----------------------------------------------------
+# MODULE 20 : API VALIDATION TESTING
+# ----------------------------------------------------
+
+def api_validation_test(page):
+
+    print("\n========== API VALIDATION TEST START ==========\n")
+
+    api_requests = []
+    failed_requests = []
+    auth_requests = []
+    screenshots = []
+
+    # ------------------------------------------------
+    # 20.1 PAGE CHECK
+    # ------------------------------------------------
+
+    print("[20.1] Checking current page...")
+
+    try:
+
+        current_url = page.url
+
+        print(f"Current URL : {current_url}")
+        print("Page available")
+
+    except Exception as e:
+
+        print("❌ Page check failed")
+        print(f"Error : {e}")
+
+        return {
+            "module": "API Validation",
+            "status": "FAIL",
+
+            "api_count": 0,
+            "api_passed": 0,
+            "api_failed": 1,
+            "api_score": 0,
+
+            "api_requests": [],
+            "failed_requests": [],
+            "auth_requests": [],
+
+            "tested_features": 1,
+            "passed_features": 0,
+            "failed_features": 1,
+
+            "issues": [
+                str(e)
+            ],
+
+            "recommendations": [
+                "Verify website availability."
+            ],
+
+            "screenshots": [],
+
+            "issue": str(e),
+
+            "possible_reason":
+                "Page could not be accessed.",
+
+            "developer_action":
+                "Review Playwright page loading logs."
+        }
+
+    # ------------------------------------------------
+    # 20.2 API RESPONSE MONITORING
+    # ------------------------------------------------
+
+    print(
+        "\n[20.2] Starting API/network monitoring..."
+    )
+
+    def handle_response(response):
+
+        try:
+
+            request = response.request
+
+            resource_type = request.resource_type
+
+            # Only API-like requests
+            if resource_type not in [
+                "xhr",
+                "fetch"
+            ]:
+                return
+
+            status_code = response.status
+
+            api_data = {
+
+                "method":
+                    request.method,
+
+                "url":
+                    response.url,
+
+                "status":
+                    status_code,
+
+                "resource_type":
+                    resource_type
+            }
+
+            api_requests.append(
+                api_data
+            )
+
+            print("--------------------------------")
+            print("📡 API RESPONSE DETECTED")
+
+            print(
+                f"Method        : "
+                f"{request.method}"
+            )
+
+            print(
+                f"URL           : "
+                f"{response.url}"
+            )
+
+            print(
+                f"Resource Type : "
+                f"{resource_type}"
+            )
+
+            print(
+                f"Status        : "
+                f"{status_code}"
+            )
+
+            # ----------------------------------------
+            # Authentication responses
+            # ----------------------------------------
+
+            if status_code in [
+                401,
+                403
+            ]:
+
+                auth_requests.append({
+
+                    "method":
+                        request.method,
+
+                    "url":
+                        response.url,
+
+                    "status":
+                        status_code
+                })
+
+                print(
+                    "⚠️ Authentication response detected"
+                )
+
+            # ----------------------------------------
+            # Normal API validation
+            # ----------------------------------------
+
+            if (
+                status_code is not None
+                and
+                200 <= status_code < 400
+            ):
+
+                print(
+                    "✅ API RESPONSE PASS"
+                )
+
+            elif status_code in [
+                401,
+                403
+            ]:
+
+                print(
+                    "⚠️ AUTHENTICATION RESPONSE"
+                )
+
+            else:
+
+                print(
+                    "❌ API RESPONSE FAIL"
+                )
+
+        except Exception as e:
+
+            print(
+                "⚠️ API response processing error"
+            )
+
+            print(
+                f"Error : {e}"
+            )
+
+    # Attach listener BEFORE reload
+    page.on(
+        "response",
+        handle_response
+    )
+
+    # ------------------------------------------------
+    # 20.3 RELOAD PAGE
+    # ------------------------------------------------
+
+    print(
+        "\n[20.3] Reloading page..."
+    )
+
+    try:
+
+        page.reload(
+            wait_until="domcontentloaded",
+            timeout=60000
+        )
+
+        print(
+            "Page reloaded"
+        )
+
+    except Exception as e:
+
+        print(
+            "⚠️ Page reload warning"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+    # ------------------------------------------------
+    # 20.4 WAIT FOR API RESPONSES
+    # ------------------------------------------------
+
+    print(
+        "\n[20.4] Waiting for API responses..."
+    )
+
+    try:
+
+        page.wait_for_timeout(
+            5000
+        )
+
+    except Exception as e:
+
+        print(
+            "⚠️ API wait warning"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+    print(
+        f"Captured API responses : "
+        f"{len(api_requests)}"
+    )
+
+    # ------------------------------------------------
+    # 20.5 REMOVE DUPLICATES
+    # ------------------------------------------------
+
+    print(
+        "\n[20.5] Removing duplicate API entries..."
+    )
+
+    unique_requests = []
+
+    seen = set()
+
+    for request in api_requests:
+
+        key = (
+            request["method"],
+            request["url"],
+            request["status"]
+        )
+
+        if key not in seen:
+
+            seen.add(key)
+
+            unique_requests.append(
+                request
+            )
+
+    api_requests = unique_requests
+
+    print(
+        f"Unique API requests : "
+        f"{len(api_requests)}"
+    )
+
+    # ------------------------------------------------
+    # 20.6 CALCULATE API RESULTS
+    # ------------------------------------------------
+
+    print(
+        "\n[20.6] Calculating API results..."
+    )
+
+    api_passed = 0
+    api_failed = 0
+
+    for request in api_requests:
+
+        status_code = request["status"]
+
+        # --------------------------------------------
+        # Successful API
+        # --------------------------------------------
+
+        if (
+            status_code is not None
+            and
+            200 <= status_code < 400
+        ):
+
+            api_passed += 1
+
+        # --------------------------------------------
+        # 401 / 403
+        # --------------------------------------------
+        # These are authentication responses.
+        # Do NOT automatically count them as API failure.
+        # --------------------------------------------
+
+        elif status_code in [
+            401,
+            403
+        ]:
+
+            continue
+
+        # --------------------------------------------
+        # Other 4xx / 5xx
+        # --------------------------------------------
+
+        else:
+
+            api_failed += 1
+
+            failed_requests.append({
+
+                "method":
+                    request["method"],
+
+                "url":
+                    request["url"],
+
+                "status":
+                    status_code
+            })
+
+    api_count = len(
+        api_requests
+    )
+
+    print("--------------------------------")
+
+    print(
+        f"Total APIs Detected : "
+        f"{api_count}"
+    )
+
+    print(
+        f"APIs Passed : "
+        f"{api_passed}"
+    )
+
+    print(
+        f"APIs Failed : "
+        f"{api_failed}"
+    )
+
+    print("--------------------------------")
+
+    # ------------------------------------------------
+    # 20.7 DETERMINE STATUS
+    # ------------------------------------------------
+
+    issues = []
+
+    recommendations = []
+
+    issue = ""
+
+    possible_reason = ""
+
+    developer_action = ""
+
+    # ------------------------------------------------
+    # NO API DETECTED
+    # ------------------------------------------------
+
+    if api_count == 0:
+
+        status = "NOT_AVAILABLE"
+
+        api_score = None
+
+        recommendations = [
+
+            "No XHR or Fetch API requests were detected.",
+
+            "API validation is not applicable to "
+            "the current webpage during this test."
+        ]
+
+        possible_reason = (
+
+            "The webpage did not make any XHR or "
+            "Fetch requests during the tested page load."
+        )
+
+        developer_action = (
+
+            "No action required unless the webpage "
+            "is expected to communicate with backend APIs."
+        )
+
+        print(
+            "No XHR/Fetch API requests detected."
+        )
+
+    # ------------------------------------------------
+    # API FAILURE
+    # ------------------------------------------------
+
+    elif api_failed > 0:
+
+        status = "FAIL"
+
+        api_score = int(
+
+            (
+                api_passed /
+                api_count
+            ) * 100
+
+        )
+
+        issues.append(
+
+            f"{api_failed} API request(s) "
+            "returned unexpected error status."
+        )
+
+        recommendations = [
+
+            "Fix failed API requests.",
+
+            "Verify API endpoints and HTTP status codes.",
+
+            "Review backend/server logs.",
+
+            "Verify frontend API integration."
+        ]
+
+        issue = (
+
+            f"{api_failed} API request(s) "
+            "failed."
+        )
+
+        possible_reason = (
+
+            "One or more API endpoints returned "
+            "unexpected 4xx or 5xx responses."
+        )
+
+        developer_action = (
+
+            "Review the failed API endpoints, "
+            "backend logs, request parameters and "
+            "server responses."
+        )
+
+    # ------------------------------------------------
+    # API PASS
+    # ------------------------------------------------
+
+    else:
+
+        status = "PASS"
+
+        api_score = 100
+
+        recommendations = [
+
+            "All detected API requests returned "
+            "successful responses."
+        ]
+
+        print(
+            "All detected APIs passed."
+        )
+
+    # ------------------------------------------------
+    # 20.8 API DETAILS
+    # ------------------------------------------------
+
+    print(
+        "\n[20.8] API details..."
+    )
+
+    if api_count == 0:
+
+        print(
+            "No API requests detected."
+        )
+
+    else:
+
+        for index, request in enumerate(
+            api_requests,
+            start=1
+        ):
+
+            print("--------------------------------")
+
+            print(
+                f"API #{index}"
+            )
+
+            print(
+                f"Method        : "
+                f"{request['method']}"
+            )
+
+            print(
+                f"URL           : "
+                f"{request['url']}"
+            )
+
+            print(
+                f"Resource Type : "
+                f"{request['resource_type']}"
+            )
+
+            print(
+                f"Status        : "
+                f"{request['status']}"
+            )
+
+            if (
+                request["status"] is not None
+                and
+                200 <= request["status"] < 400
+            ):
+
+                print(
+                    "✅ API PASS"
+                )
+
+            elif request["status"] in [
+                401,
+                403
+            ]:
+
+                print(
+                    "⚠️ AUTHENTICATION RESPONSE"
+                )
+
+            else:
+
+                print(
+                    "❌ API FAIL"
+                )
+
+    # ------------------------------------------------
+    # 20.9 API FAILURE DETAILS
+    # ------------------------------------------------
+
+    print(
+        "\n[20.9] API failure details..."
+    )
+
+    if failed_requests:
+
+        for failure in failed_requests:
+
+            print("--------------------------------")
+
+            print(
+                f"Method : "
+                f"{failure['method']}"
+            )
+
+            print(
+                f"URL : "
+                f"{failure['url']}"
+            )
+
+            print(
+                f"Status : "
+                f"{failure['status']}"
+            )
+
+    else:
+
+        print(
+            "No unexpected failed API requests detected."
+        )
+
+    # ------------------------------------------------
+    # 20.9A AUTHENTICATION DETAILS
+    # ------------------------------------------------
+
+    print(
+        "\n[20.9A] Authentication response details..."
+    )
+
+    if auth_requests:
+
+        for auth in auth_requests:
+
+            print("--------------------------------")
+
+            print(
+                f"Method : "
+                f"{auth['method']}"
+            )
+
+            print(
+                f"URL : "
+                f"{auth['url']}"
+            )
+
+            print(
+                f"Status : "
+                f"{auth['status']}"
+            )
+
+    else:
+
+        print(
+            "No 401/403 authentication responses detected."
+        )
+
+    # ------------------------------------------------
+    # 20.10 SCREENSHOT
+    # ------------------------------------------------
+
+    print(
+        "\n[20.10] Taking screenshot..."
+    )
+
+    screenshot = (
+        "screenshots/api_validation_test.png"
+    )
+
+    try:
+
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+
+        screenshots.append(
+            screenshot
+        )
+
+        print(
+            f"Screenshot saved : "
+            f"{screenshot}"
+        )
+
+    except Exception as e:
+
+        print(
+            "Screenshot failed"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+    # ------------------------------------------------
+    # 20.11 FINAL SUMMARY
+    # ------------------------------------------------
+
+    print(
+        "\n================================"
+    )
+
+    print(
+        f"API Count   : "
+        f"{api_count}"
+    )
+
+    print(
+        f"API Passed  : "
+        f"{api_passed}"
+    )
+
+    print(
+        f"API Failed  : "
+        f"{api_failed}"
+    )
+
+    if api_score is None:
+
+        print(
+            "API Score   : N/A"
+        )
+
+    else:
+
+        print(
+            f"API Score   : "
+            f"{api_score}%"
+        )
+
+    print(
+        f"Status      : "
+        f"{status}"
+    )
+
+    print(
+        "================================"
+    )
+
+    print(
+        "========== API VALIDATION TEST END ==========\n"
+    )
+
+    # ------------------------------------------------
+    # RETURN RESULT
+    # ------------------------------------------------
+
+    return {
+
+        "module":
+            "API Validation",
+
+        "status":
+            status,
+
+        "api_count":
+            api_count,
+
+        "api_passed":
+            api_passed,
+
+        "api_failed":
+            api_failed,
+
+        "api_score":
+            api_score,
+
+        "api_requests":
+            api_requests,
+
+        "failed_requests":
+            failed_requests,
+
+        "auth_requests":
+            auth_requests,
+
+        "issues":
+            issues,
+
+        "recommendations":
+            recommendations,
+
+        "screenshots":
+            screenshots,
+
+        "issue":
+            issue,
+
+        "possible_reason":
+            possible_reason,
+
+        "developer_action":
+            developer_action
+    }   
+
+# ----------------------------------------------------
+# MODULE 21 : BROWSER COMPATIBILITY
+# ----------------------------------------------------
+
+def browser_compatibility_test(playwright, url):
+
+    print("========== BROWSER COMPATIBILITY TEST START ==========\n")
+
+    browsers = [
+        ("Chrome", playwright.chromium),
+        ("Firefox", playwright.firefox),
+        ("Edge", playwright.chromium)
+    ]
+
+    passed = 0
+    failed = 0
+
+    screenshots = []
+    issues = []
+
+    # ------------------------------------------------
+    # 21.1 START TEST
+    # ------------------------------------------------
+
+    print("[21.1] Starting browser compatibility testing...")
+    print(f"Website URL : {url}\n")
+
+    # ------------------------------------------------
+    # 21.2 TEST EACH BROWSER
+    # ------------------------------------------------
+
+    for browser_name, browser_type in browsers:
+
+        print("--------------------------------")
+        print(f"Testing Browser : {browser_name}")
+
+        browser = None
+        page = None
+
+        try:
+
+            # ----------------------------------------
+            # Launch browser
+            # ----------------------------------------
+
+            print(
+                f"[21.2] Launching {browser_name}..."
+            )
+
+            browser = browser_type.launch(
+                headless=True
+            )
+
+            print(
+                f"✅ {browser_name} launched"
+            )
+
+            # ----------------------------------------
+            # Create page
+            # ----------------------------------------
+
+            page = browser.new_page(
+                viewport={
+                    "width": 1366,
+                    "height": 768
+                }
+            )
+
+            print(
+                f"[21.3] Opening website in {browser_name}..."
+            )
+
+            # IMPORTANT:
+            # Use domcontentloaded instead of networkidle
+            # to avoid unnecessary timeout.
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            print(
+                f"✅ Page opened in {browser_name}"
+            )
+
+            # ----------------------------------------
+            # Wait for rendering
+            # ----------------------------------------
+
+            page.wait_for_timeout(
+                3000
+            )
+
+            # ----------------------------------------
+            # Page title
+            # ----------------------------------------
+
+            title = page.title()
+
+            print(
+                f"Page Title : {title}"
+            )
+
+            # ----------------------------------------
+            # Current URL
+            # ----------------------------------------
+
+            current_url = page.url
+
+            print(
+                f"Final URL : {current_url}"
+            )
+
+            # ----------------------------------------
+            # Body check
+            # ----------------------------------------
+
+            body = page.locator(
+                "body"
+            )
+
+            body_visible = body.is_visible()
+
+            print(
+                f"Body Visible : {body_visible}"
+            )
+
+            # ----------------------------------------
+            # Screenshot
+            # ----------------------------------------
+
+            screenshot = (
+                f"screenshots/"
+                f"{browser_name.lower()}"
+                f"_compatibility_test.png"
+            )
+
+            print(
+                f"[21.4] Taking screenshot..."
+            )
+
+            page.screenshot(
+                path=screenshot,
+                full_page=True
+            )
+
+            screenshots.append(
+                screenshot
+            )
+
+            print(
+                f"✅ Screenshot saved : "
+                f"{screenshot}"
+            )
+
+            # ----------------------------------------
+            # Browser result
+            # ----------------------------------------
+
+            if (
+                title.strip() != ""
+                and
+                body_visible
+            ):
+
+                print(
+                    f"✅ {browser_name} "
+                    f"Browser Compatible"
+                )
+
+                passed += 1
+
+            else:
+
+                print(
+                    f"❌ {browser_name} "
+                    f"Browser Validation Failed"
+                )
+
+                failed += 1
+
+                issues.append(
+                    f"{browser_name} : "
+                    "Page did not render correctly."
+                )
+
+        except Exception as e:
+
+            print(
+                f"❌ {browser_name} FAILED"
+            )
+
+            print(
+                f"Error : {e}"
+            )
+
+            failed += 1
+
+            issues.append(
+                f"{browser_name} : {str(e)}"
+            )
+
+        finally:
+
+            # ----------------------------------------
+            # Close browser
+            # ----------------------------------------
+
+            if browser is not None:
+
+                try:
+
+                    browser.close()
+
+                    print(
+                        f"Browser closed : "
+                        f"{browser_name}"
+                    )
+
+                except Exception as e:
+
+                    print(
+                        f"⚠️ Browser close error : "
+                        f"{e}"
+                    )
+
+    # ------------------------------------------------
+    # 21.5 CALCULATE SCORE
+    # ------------------------------------------------
+
+    print(
+        "\n[21.5] Calculating browser results..."
+    )
+
+    total_browsers = len(
+        browsers
+    )
+
+    if total_browsers > 0:
+
+        score = int(
+            (
+                passed /
+                total_browsers
+            ) * 100
+        )
+
+    else:
+
+        score = 0
+
+    if failed == 0:
+
+        status = "PASS"
+
+        recommendations = [
+            "Website rendered successfully "
+            "in all tested browsers."
+        ]
+
+        issue = ""
+
+        possible_reason = ""
+
+        developer_action = ""
+
+    else:
+
+        status = "FAIL"
+
+        recommendations = [
+            "Fix browser-specific "
+            "compatibility issues."
+        ]
+
+        issue = (
+            f"{failed} browser(s) "
+            "failed compatibility testing."
+        )
+
+        possible_reason = (
+            "Browser-specific rendering, "
+            "JavaScript or CSS differences."
+        )
+
+        developer_action = (
+            "Review browser-specific "
+            "CSS and JavaScript."
+        )
+
+    # ------------------------------------------------
+    # 21.6 PRINT RESULT
+    # ------------------------------------------------
+
+    print("\n================================")
+    print(
+        f"Browsers Tested : "
+        f"{total_browsers}"
+    )
+
+    print(
+        f"Passed Browsers : "
+        f"{passed}"
+    )
+
+    print(
+        f"Failed Browsers : "
+        f"{failed}"
+    )
+
+    print(
+        f"Browser Score : "
+        f"{score}%"
+    )
+
+    print(
+        f"Status : {status}"
+    )
+
+    print("================================")
+
+    if issues:
+
+        print(
+            "\nBrowser Issues:"
+        )
+
+        for issue_item in issues:
+
+            print(
+                f"❌ {issue_item}"
+            )
+
+    else:
+
+        print(
+            "\n✅ No browser compatibility "
+            "issues detected."
+        )
+
+    print(
+        "\n========== BROWSER COMPATIBILITY TEST END ==========\n"
+    )
+
+    # ------------------------------------------------
+    # RETURN RESULT
+    # ------------------------------------------------
+
+    return {
+
+        "module": "Browser Compatibility",
+
+        "status": status,
+
+        "browser_score": score,
+
+        "browsers_tested": total_browsers,
+
+        "passed_browsers": passed,
+
+        "failed_browsers": failed,
+
+        "issues": issues,
+
+        "recommendations": recommendations,
+
+        "screenshots": screenshots,
+
+        "issue": issue,
+
+        "possible_reason": possible_reason,
+
+        "developer_action": developer_action
+
+    }    
+    
+# ============================================================
+# MODULE 22 : FINAL QA PDF REPORT GENERATION
+# ============================================================
+# ----------------------------------------------------
+# MODULE 22 : FINAL REPORT GENERATION
+# ----------------------------------------------------
+
+def final_report_generation_test(results):
+
+    print("\n========== FINAL REPORT GENERATION START ==========\n")
+
+    try:
+
+        # =================================================
+        # 22.1 FUNCTIONAL MODULE COUNT
+        # =================================================
+
+        # Actual functional modules
+        TOTAL_FUNCTIONAL_MODULES = 20
+
+        # Module 22 itself is NOT included in results
+        executed_modules = len(results)
+
+        passed = sum(
+            1
+            for result in results
+            if result.get("status", "").upper() == "PASS"
+        )
+
+        failed = sum(
+            1
+            for result in results
+            if result.get("status", "").upper() == "FAIL"
+        )
+
+        not_available = sum(
+            1
+            for result in results
+            if result.get("status", "").upper() == "NOT_AVAILABLE"
+        )
+
+        skipped = sum(
+            1
+            for result in results
+            if result.get("status", "").upper() == "SKIPPED"
+        )
+
+        tested_modules = passed + failed
+
+        if tested_modules > 0:
+
+            functional_score = int(
+                (passed / tested_modules) * 100
+            )
+
+        else:
+
+            functional_score = 0
+
+        # =================================================
+        # 22.2 SUMMARY OBJECT
+        # =================================================
+
+        summary = {
+
+            "total_functional_modules":
+                TOTAL_FUNCTIONAL_MODULES,
+
+            "executed_modules":
+                executed_modules,
+
+            "passed":
+                passed,
+
+            "failed":
+                failed,
+
+            "not_available":
+                not_available,
+
+            "skipped":
+                skipped,
+
+            "tested_modules":
+                tested_modules,
+
+            "functional_score":
+                functional_score
+        }
+
+        # =================================================
+        # 22.3 MODULE-WISE SUMMARY
+        # NO INDIVIDUAL MODULE SCORE
+        # =================================================
+
+        module_summary = []
+
+        for result in results:
+
+            module_summary.append({
+
+                "module":
+                    result.get(
+                        "module",
+                        "Unknown Module"
+                    ),
+
+                "status":
+                    result.get(
+                        "status",
+                        "UNKNOWN"
+                    ),
+
+                "issues":
+                    result.get(
+                        "issues",
+                        []
+                    ),
+
+                "recommendations":
+                    result.get(
+                        "recommendations",
+                        result.get(
+                            "recommendation",
+                            []
+                        )
+                    ),
+
+                "possible_reason":
+                    result.get(
+                        "possible_reason",
+                        ""
+                    ),
+
+                "developer_action":
+                    result.get(
+                        "developer_action",
+                        ""
+                    )
+            })
+
+        # =================================================
+        # 22.4 FAILED MODULE DETAILS
+        # =================================================
+
+        failed_modules = []
+
+        for result in results:
+
+            if result.get("status", "").upper() != "FAIL":
+                continue
+
+            failed_modules.append({
+
+                "module":
+                    result.get(
+                        "module",
+                        "Unknown Module"
+                    ),
+
+                "issues":
+                    result.get(
+                        "issues",
+                        []
+                    ),
+
+                "issue":
+                    result.get(
+                        "issue",
+                        ""
+                    ),
+
+                "possible_reason":
+                    result.get(
+                        "possible_reason",
+                        ""
+                    ),
+
+                "developer_action":
+                    result.get(
+                        "developer_action",
+                        ""
+                    )
+            })
+
+        # =================================================
+        # 22.5 EXACT BROKEN LINKS
+        # =================================================
+
+        broken_links = []
+
+        for result in results:
+
+            module_name = result.get(
+                "module",
+                "Unknown Module"
+            )
+
+            possible_links = result.get(
+                "broken_links",
+                []
+            )
+
+            if not isinstance(
+                possible_links,
+                list
+            ):
+                continue
+
+            for link in possible_links:
+
+                if isinstance(link, dict):
+
+                    broken_links.append({
+
+                        "module":
+                            module_name,
+
+                        "url":
+                            link.get(
+                                "url",
+                                ""
+                            ),
+
+                        "status":
+                            link.get(
+                                "status",
+                                None
+                            ),
+
+                        "reason":
+                            link.get(
+                                "reason",
+                                "Broken link"
+                            )
+                    })
+
+        # Remove duplicates
+
+        unique_broken_links = []
+
+        seen_links = set()
+
+        for link in broken_links:
+
+            key = (
+                link.get("module"),
+                link.get("url"),
+                link.get("status")
+            )
+
+            if key not in seen_links:
+
+                seen_links.add(key)
+
+                unique_broken_links.append(
+                    link
+                )
+
+        broken_links = unique_broken_links
+
+        # =================================================
+        # 22.6 FAILED APIs
+        # =================================================
+
+        failed_apis = []
+
+        for result in results:
+
+            failures = result.get(
+                "failed_requests",
+                []
+            )
+
+            if not isinstance(
+                failures,
+                list
+            ):
+                continue
+
+            for failure in failures:
+
+                if isinstance(
+                    failure,
+                    dict
+                ):
+
+                    failed_apis.append({
+
+                        "module":
+                            result.get(
+                                "module",
+                                "API Validation"
+                            ),
+
+                        "method":
+                            failure.get(
+                                "method",
+                                ""
+                            ),
+
+                        "url":
+                            failure.get(
+                                "url",
+                                ""
+                            ),
+
+                        "status":
+                            failure.get(
+                                "status",
+                                None
+                            )
+                    })
+
+        # =================================================
+        # 22.7 SECURITY ISSUES
+        # =================================================
+
+        security_issues = []
+
+        for result in results:
+
+            module_name = str(
+                result.get(
+                    "module",
+                    ""
+                )
+            ).lower()
+
+            if "security" in module_name:
+
+                issues = result.get(
+                    "issues",
+                    []
+                )
+
+                if isinstance(
+                    issues,
+                    list
+                ):
+
+                    security_issues.extend(
+                        issues
+                    )
+
+        # =================================================
+        # 22.8 SEO ISSUES
+        # =================================================
+
+        seo_issues = []
+
+        for result in results:
+
+            module_name = str(
+                result.get(
+                    "module",
+                    ""
+                )
+            ).lower()
+
+            if "seo" not in module_name:
+                continue
+
+            issues = result.get(
+                "issues",
+                []
+            )
+
+            recommendations = result.get(
+                "recommendations",
+                []
+            )
+
+            if isinstance(
+                issues,
+                list
+            ):
+
+                seo_issues.extend(
+                    issues
+                )
+
+            if isinstance(
+                recommendations,
+                list
+            ):
+
+                seo_issues.extend(
+                    recommendations
+                )
+
+        # =================================================
+        # 22.9 ACCESSIBILITY ISSUES
+        # =================================================
+
+        accessibility_issues = []
+
+        for result in results:
+
+            module_name = str(
+                result.get(
+                    "module",
+                    ""
+                )
+            ).lower()
+
+            if "accessibility" not in module_name:
+                continue
+
+            issues = result.get(
+                "issues",
+                []
+            )
+
+            if isinstance(
+                issues,
+                list
+            ):
+
+                accessibility_issues.extend(
+                    issues
+                )
+
+        # =================================================
+        # 22.10 ALL ISSUES
+        # =================================================
+
+        all_issues = []
+
+        for result in results:
+
+            issues = result.get(
+                "issues",
+                []
+            )
+
+            if not isinstance(
+                issues,
+                list
+            ):
+                continue
+
+            for issue in issues:
+
+                if issue:
+
+                    all_issues.append({
+
+                        "module":
+                            result.get(
+                                "module",
+                                "Unknown Module"
+                            ),
+
+                        "issue":
+                            issue
+                    })
+
+        # =================================================
+        # 22.11 AI SUGGESTIONS
+        # =================================================
+
+        ai_suggestions = []
+
+        if failed > 0:
+
+            ai_suggestions.append(
+                "Prioritize fixing failed functional modules."
+            )
+
+        if broken_links:
+
+            ai_suggestions.append(
+                "Review and correct the broken links listed in this report."
+            )
+
+        if failed_apis:
+
+            ai_suggestions.append(
+                "Investigate failed API endpoints and verify backend responses."
+            )
+
+        if security_issues:
+
+            ai_suggestions.append(
+                "Review security headers and apply the required security policies."
+            )
+
+        if seo_issues:
+
+            ai_suggestions.append(
+                "Improve SEO configuration including metadata, robots.txt, sitemap.xml and structured data where applicable."
+            )
+
+        if accessibility_issues:
+
+            ai_suggestions.append(
+                "Resolve accessibility issues and verify WCAG compliance."
+            )
+
+        if not ai_suggestions:
+
+            ai_suggestions.append(
+                "No major automated issues were detected. Perform manual exploratory testing."
+            )
+
+        # Remove duplicate suggestions
+
+        ai_suggestions = list(
+            dict.fromkeys(
+                ai_suggestions
+            )
+        )
+
+        # =================================================
+        # 22.12 SCREENSHOTS
+        # =================================================
+
+        screenshots = []
+
+        for result in results:
+
+            # Single screenshot
+            single = result.get(
+                "screenshot"
+            )
+
+            if single:
+
+                screenshots.append(
+                    single
+                )
+
+            # Multiple screenshots
+            multiple = result.get(
+                "screenshots",
+                []
+            )
+
+            if isinstance(
+                multiple,
+                list
+            ):
+
+                screenshots.extend(
+                    item
+                    for item in multiple
+                    if item
+                )
+
+        screenshots = list(
+            dict.fromkeys(
+                screenshots
+            )
+        )
+
+        # =================================================
+        # 22.13 FINAL REPORT OBJECT
+        # =================================================
+
+        final_report = {
+
+            "module":
+                "Final Report Generation",
+
+            "status":
+                "PASS",
+
+            "summary":
+                summary,
+
+            "module_summary":
+                module_summary,
+
+            "failed_modules":
+                failed_modules,
+
+            "broken_links":
+                broken_links,
+
+            "failed_apis":
+                failed_apis,
+
+            "security_issues":
+                list(
+                    dict.fromkeys(
+                        security_issues
+                    )
+                ),
+
+            "seo_issues":
+                list(
+                    dict.fromkeys(
+                        seo_issues
+                    )
+                ),
+
+            "accessibility_issues":
+                list(
+                    dict.fromkeys(
+                        accessibility_issues
+                    )
+                ),
+
+            "all_issues":
+                all_issues,
+
+            "ai_suggestions":
+                ai_suggestions,
+
+            "screenshots":
+                screenshots
+        }
+
+        # =================================================
+        # 22.14 PRINT SUMMARY
+        # =================================================
+
+        print("\n===========================================")
+        print("FINAL QA REPORT")
+        print("===========================================")
+
+        print(
+            f"Total Functional Modules : "
+            f"{TOTAL_FUNCTIONAL_MODULES}"
+        )
+
+        print(
+            f"Executed Modules         : "
+            f"{executed_modules}"
+        )
+
+        print(
+            f"Passed                   : "
+            f"{passed}"
+        )
+
+        print(
+            f"Failed                   : "
+            f"{failed}"
+        )
+
+        print(
+            f"Not Available            : "
+            f"{not_available}"
+        )
+
+        print(
+            f"Skipped                  : "
+            f"{skipped}"
+        )
+
+        print(
+            f"Tested Modules           : "
+            f"{tested_modules}"
+        )
+
+        print(
+            f"Functional Score         : "
+            f"{functional_score}%"
+        )
+
+        print("-------------------------------------------")
+
+        # =================================================
+        # 22.15 BROKEN LINKS
+        # =================================================
+
+        print("\nBROKEN LINKS")
+
+        if broken_links:
+
+            for index, link in enumerate(
+                broken_links,
+                start=1
+            ):
+
+                print(
+                    f"{index}. "
+                    f"[{link['module']}] "
+                    f"{link['url']} "
+                    f"| Status: {link['status']} "
+                    f"| {link['reason']}"
+                )
+
+        else:
+
+            print(
+                "No broken links detected."
+            )
+
+        # =================================================
+        # 22.16 FAILED APIs
+        # =================================================
+
+        print("\nFAILED APIs")
+
+        if failed_apis:
+
+            for index, api in enumerate(
+                failed_apis,
+                start=1
+            ):
+
+                print(
+                    f"{index}. "
+                    f"{api['method']} "
+                    f"{api['url']} "
+                    f"| Status: {api['status']}"
+                )
+
+        else:
+
+            print(
+                "No failed APIs detected."
+            )
+
+        # =================================================
+        # 22.17 AI SUGGESTIONS
+        # =================================================
+
+        print("\nAI SUGGESTIONS")
+
+        for suggestion in ai_suggestions:
+
+            print(
+                f"• {suggestion}"
+            )
+
+        print("\n===========================================")
+        print(
+            "FINAL REPORT GENERATION COMPLETED"
+        )
+        print("===========================================\n")
+
+        # =================================================
+        # IMPORTANT
+        # Do NOT append this report to results
+        # =================================================
+
+        return final_report
+
+    except Exception as e:
+
+        print(
+            "\n❌ FINAL REPORT GENERATION ERROR"
+        )
+
+        print(
+            f"Error : {e}"
+        )
+
+        return {
+
+            "module":
+                "Final Report Generation",
+
+            "status":
+                "FAIL",
+
+            "summary": {
+
+                "total_functional_modules":
+                    20,
+
+                "executed_modules":
+                    len(results),
+
+                "passed":
+                    0,
+
+                "failed":
+                    1,
+
+                "not_available":
+                    0,
+
+                "skipped":
+                    0,
+
+                "tested_modules":
+                    1,
+
+                "functional_score":
+                    0
+            },
+
+            "issues": [
+                str(e)
+            ],
+
+            "ai_suggestions": [
+                "Review final report generation logic."
+            ],
+
+            "screenshots": []
+        }
+ 
 # =====================================
 # Main Functional Testing
 # =====================================
@@ -3871,6 +9439,8 @@ def accessibility_check(page):
 def functional_testing(url):
 
     results = []
+
+    TOTAL_MODULES = 20
 
     print("\n===========================================")
     print("STARTING FUNCTIONAL TEST")
@@ -3886,9 +9456,9 @@ def functional_testing(url):
 
             page = browser.new_page()
 
-            # ---------------------------
-            # Module 1
-            # ---------------------------
+            # ====================================================
+            # MODULE 1
+            # ====================================================
 
             print("\nRunning Module 1 : Website Open")
 
@@ -3896,172 +9466,517 @@ def functional_testing(url):
                 website_open_test(page, url)
             )
 
-            # ---------------------------
-            # Module 2
-            # ---------------------------
+            # ====================================================
+            # MODULE 2
+            # ====================================================
 
             print("\nRunning Module 2 : Navigation Links")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(2000)
 
             results.append(
                 navigation_links_test(page, url)
             )
 
-            # ---------------------------
-            # Module 3
-            # ---------------------------
+            # ====================================================
+            # MODULE 3
+            # ====================================================
 
             print("\nRunning Module 3 : Navbar")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1500)
 
             results.append(
                 navbar_test(page)
             )
 
-            # ---------------------------
-            # Module 4
-            # ---------------------------
+            # ====================================================
+            # MODULE 4
+            # ====================================================
 
             print("\nRunning Module 4 : Footer")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1500)
 
             results.append(
                 footer_test(page, url)
             )
 
-            # ---------------------------
-            # Module 5
-            # ---------------------------
+            # ====================================================
+            # MODULE 5
+            # ====================================================
 
             print("\nRunning Module 5 : Buttons")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1500)
 
             results.append(
                 buttons_test(page)
             )
-            # ---------------------------
-            # Module 6
-            # ---------------------------
+
+            # ====================================================
+            # MODULE 6
+            # ====================================================
 
             print("\nRunning Module 6 : Forms Validation")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1500)
 
             results.append(
                 form_validation_test(page)
             )
-            # ---------------------------
-            # Module 7
-            # ---------------------------
+
+            # ====================================================
+            # MODULE 7
+            # ====================================================
 
             print("\nRunning Module 7 : Images")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1500)
 
             results.append(
                 image_test(page, url)
             )
-            # ---------------------------
-            # Module 8
-            # ---------------------------
+
+            # ====================================================
+            # MODULE 8
+            # ====================================================
 
             print("\nRunning Module 8 : Content Validation")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(1500)
 
             results.append(
                 content_validation_test(page)
             )
-            # ---------------------------
-            # Module 9
-            # ---------------------------
+
+            # ====================================================
+            # MODULE 9
+            # ====================================================
 
             print("\nRunning Module 9 : Content Quality")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(3000)
 
             results.append(
                 content_quality_test(page)
             )
-            # ---------------------------
-            # Module 11
-            # ---------------------------
+
+            # ====================================================
+            # MODULE 10
+            # ====================================================
+
+            print("\nRunning Module 10 : Authentication Testing")
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(3000)
+
+            results.append(
+                authentication_test(page)
+            )
+
+            # ====================================================
+            # MODULE 11
+            # ====================================================
 
             print("\nRunning Module 11 : Session & Cookies")
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(3000)
 
             results.append(
                 session_cookie_test(page)
             )
-            # ---------------------------
-            # Module 12
-            # ---------------------------
 
-            print("\nRunning Module 12 : Search Functionality")
+            # ====================================================
+            # MODULE 12
+            # ====================================================
 
-            page.goto(url)
+            
 
-            page.wait_for_load_state("networkidle")
-
-            results.append(
-                search_functionality_test(page)
-            )
-            # ---------------------------
-            # Module 13
-            # ---------------------------
+            # ====================================================
+            # MODULE 13
+            # ====================================================
 
             print("\nRunning Module 13 : Accessibility (WCAG)")
 
-            page.goto(url)
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-            page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(3000)
 
             results.append(
                 accessibility_check(page)
             )
-        
-            
+
+            # ====================================================
+            # MODULE 14
+            # ====================================================
+
+            print("\nRunning Module 14 : SEO Testing")
+
+            try:
+
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=60000
+                )
+
+                page.wait_for_timeout(5000)
+
+                results.append(
+                    seo_test(page, url)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 14 SEO Error")
+                print(f"Error : {e}")
+
+                results.append({
+                    "module": "SEO",
+                    "status": "FAIL",
+                    "seo_score": 0,
+                    "issues": [str(e)],
+                    "recommendations": [
+                        "Review SEO test implementation."
+                    ],
+                    "screenshots": [],
+                    "issue": str(e),
+                    "possible_reason":
+                        "SEO module execution failed.",
+                    "developer_action":
+                        "Fix SEO validation logic."
+                })
+
+            # ====================================================
+            # MODULE 15
+            # ====================================================
+
+            print("\nRunning Module 15 : Responsive Design")
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(4000)
+
+            results.append(
+                responsive_test(page)
+            )
+
+            # ====================================================
+            # MODULE 16
+            # ====================================================
+
+            print("\nRunning Module 16 : Security Headers")
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(4000)
+
+            results.append(
+                security_headers_test(
+                    page,
+                    url
+                )
+            )
+
+            # ====================================================
+            # MODULE 17
+            # ====================================================
+
+            print(
+                "\nRunning Module 17 : "
+                "Console Error Detection"
+            )
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(3000)
+
+            results.append(
+                console_error_detection(page)
+            )
+
+            # ====================================================
+            # MODULE 18
+            # ====================================================
+
+            print(
+                "\nRunning Module 18 : "
+                "Broken Resources"
+            )
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(3000)
+
+            results.append(
+                broken_resources_test(page)
+            )
+
+            # ====================================================
+            # MODULE 19
+            # ====================================================
+
+            print(
+                "\nRunning Module 19 : "
+                "Download / Upload Testing"
+            )
+
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(3000)
+
+            results.append(
+                download_upload_test(page)
+            )
+
+            # ====================================================
+            # MODULE 20
+            # ====================================================
+
+            print(
+                "\nRunning Module 20 : "
+                "API Validation"
+            )
+
+            # API listener should be created inside
+            # api_validation_test before its page reload.
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
+            page.wait_for_timeout(3000)
+
+            results.append(
+                api_validation_test(page)
+            )
+
+            # ====================================================
+            # MODULE 21
+            # ====================================================
+
+            print(
+                "\nRunning Module 21 : "
+                "Browser Compatibility"
+            )
+
+            results.append(
+                browser_compatibility_test(
+                    p,
+                    url
+                )
+            )
+            # ====================================================
+            # MODULE 22
+            # ====================================================
+
+            print("\nRunning Module 22 : Final Report Generation")
+
+            final_report = final_report_generation_test(
+                results
+            )
+            # ====================================================
+            # CLOSE BROWSER
+            # ====================================================
 
             browser.close()
 
-        passed = len(
-            [r for r in results if r["status"] == "PASS"]
+        # ========================================================
+        # FINAL SUMMARY
+        # ========================================================
+
+        executed_modules = len(results)
+
+        passed = sum(
+            1
+            for result in results
+            if result.get("status") == "PASS"
         )
 
-        failed = len(
-            [r for r in results if r["status"] == "FAIL"]
+        failed = sum(
+            1
+            for result in results
+            if result.get("status") == "FAIL"
         )
 
-        score = int(
-            (passed / len(results)) * 100
+        not_available = sum(
+            1
+            for result in results
+            if result.get("status") == "NOT_AVAILABLE"
         )
+
+        skipped = sum(
+            1
+            for result in results
+            if result.get("status") == "SKIPPED"
+        )
+
+        tested_modules = passed + failed
+
+        if tested_modules > 0:
+
+            score = int(
+                (passed / tested_modules) * 100
+            )
+
+        else:
+
+            score = 0
+
+        # ========================================================
+        # FINAL PRINT
+        # ========================================================
 
         print("\n===========================================")
         print("FUNCTIONAL TEST COMPLETED")
         print("===========================================")
-        print(f"Passed : {passed}")
-        print(f"Failed : {failed}")
-        print(f"Score  : {score}%")
+
+        print(
+            f"Total Modules     : {TOTAL_MODULES}"
+        )
+
+        print(
+            f"Executed Modules  : {executed_modules}"
+        )
+
+        print(
+            f"Passed            : {passed}"
+        )
+
+        print(
+            f"Failed            : {failed}"
+        )
+
+        print(
+            f"Not Available     : {not_available}"
+        )
+
+        print(
+            f"Skipped           : {skipped}"
+        )
+
+        print(
+            f"Tested Modules    : {tested_modules}"
+        )
+
+        print(
+            f"Score             : {score}%"
+        )
+
+        print("-------------------------------------------")
+
+        if executed_modules == TOTAL_MODULES:
+
+            print(
+                f"✅ All {TOTAL_MODULES} modules executed."
+            )
+
+        else:
+
+            remaining = (
+                TOTAL_MODULES -
+                executed_modules
+            )
+
+            print(
+                f"⚠️ {executed_modules} of "
+                f"{TOTAL_MODULES} modules executed."
+            )
+
+            print(
+                f"⏳ {remaining} module(s) pending."
+            )
+
         print("===========================================\n")
+
+        # ========================================================
+        # RETURN FINAL RESULT
+        # ========================================================
 
         return {
 
@@ -4071,43 +9986,91 @@ def functional_testing(url):
 
             "failed": failed,
 
-            "results": results
+            "not_available": not_available,
 
+            "skipped": skipped,
+
+            "tested_modules": tested_modules,
+
+            "executed_modules": executed_modules,
+
+            "total_modules": TOTAL_MODULES,
+
+            "results": results
         }
 
     except Exception as e:
 
-        print("\nCritical Error")
-        print(e)
+        print("\n❌ Critical Functional Testing Error")
+        print(f"Error : {e}")
+
+        # If execution stopped midway,
+        # return the modules that actually completed.
+
+        executed_modules = len(results)
+
+        passed = sum(
+            1
+            for result in results
+            if result.get("status") == "PASS"
+        )
+
+        failed = sum(
+            1
+            for result in results
+            if result.get("status") == "FAIL"
+        )
+
+        not_available = sum(
+            1
+            for result in results
+            if result.get("status") == "NOT_AVAILABLE"
+        )
+
+        skipped = sum(
+            1
+            for result in results
+            if result.get("status") == "SKIPPED"
+        )
+
+        tested_modules = passed + failed
+
+        if tested_modules > 0:
+
+            score = int(
+                (passed / tested_modules) * 100
+            )
+
+        else:
+
+            score = 0
 
         return {
 
-            "functional_score": 0,
+            "functional_score": score,
 
-            "passed": 0,
+            "passed": passed,
 
-            "failed": 1,
+            "failed": failed,
 
-            "results": [
+            "not_available": not_available,
 
-                {
+            "skipped": skipped,
 
-                    "module": "Functional Testing",
+            "tested_modules": tested_modules,
 
-                    "status": "FAIL",
+            "executed_modules": executed_modules,
 
-                    "issue": str(e),
+            "total_modules": TOTAL_MODULES,
 
-                    "possible_reason": "Playwright Error",
+            "results": results,
 
-                    "recommendation": "Verify Website",
+            "issues": [
+                str(e)
+            ],
 
-                    "developer_action": "Review Logs",
-
-                    "screenshot": ""
-
-                }
-
+            "recommendations": [
+                "Verify the failed module.",
+                "Review Playwright execution logs."
             ]
-
-        }    
+        }
