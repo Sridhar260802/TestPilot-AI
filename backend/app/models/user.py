@@ -15,4 +15,8 @@ class User(Base):
 
     password = Column(String(255), nullable=False)
 
+    # Subscription tier that gates which testing features the user can run.
+    # One of: "basic", "standard", "premium". Defaults to "basic" for new signups.
+    plan = Column(String(20), nullable=False, default="basic", server_default="basic")
+
     created_at = Column(DateTime, default=datetime.utcnow)

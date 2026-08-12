@@ -6988,24 +6988,83 @@ def download_upload_test(page):
                     item["index"]
                 )
 
-            with page.expect_download(
-                timeout=10000
-            ) as download_info:
+            before_url = page.url
 
-                locator.click(
-                    timeout=10000
+            pages_before = len(page.context.pages)
+
+            try:
+
+                with page.expect_download(
+                    timeout=8000
+                ) as download_info:
+
+                    locator.click(
+                        timeout=10000
+                    )
+
+                download = download_info.value
+
+                print(
+                    f"Downloaded file : "
+                    f"{download.suggested_filename}"
                 )
 
-            download = download_info.value
+                print("Download PASS")
 
-            print(
-                f"Downloaded file : "
-                f"{download.suggested_filename}"
-            )
+                download_passed += 1
 
-            print("Download PASS")
+            except TimeoutError:
 
-            download_passed += 1
+                # No native browser download event fired.
+                # This is still a valid outcome when the file
+                # opened in a new tab, or the page navigated
+                # directly to a file URL (inline viewer) -
+                # both are normal download behaviours.
+
+                opened_new_tab = (
+                    len(page.context.pages) > pages_before
+                )
+
+                navigated_to_file = (
+                    page.url != before_url
+                    and any(
+                        page.url.lower().endswith(ext)
+                        for ext in download_extensions
+                    )
+                )
+
+                if opened_new_tab or navigated_to_file:
+
+                    print(
+                        "Download PASS "
+                        "(opened in new tab / inline viewer)"
+                    )
+
+                    download_passed += 1
+
+                    if opened_new_tab:
+
+                        for extra_page in page.context.pages[pages_before:]:
+
+                            try:
+                                extra_page.close()
+                            except Exception:
+                                pass
+
+                    if page.url != before_url:
+
+                        try:
+                            page.goto(
+                                before_url,
+                                wait_until="domcontentloaded",
+                                timeout=60000
+                            )
+                        except Exception:
+                            pass
+
+                else:
+
+                    raise
 
         except Exception as e:
 
@@ -7549,6 +7608,26 @@ def api_validation_test(page):
         "\n[20.2] Starting API/network monitoring..."
     )
 
+    THIRD_PARTY_TRACKER_DOMAINS = [
+        "google-analytics.com",
+        "googletagmanager.com",
+        "doubleclick.net",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "facebook.com/tr",
+        "connect.facebook.net",
+        "analytics.twitter.com",
+        "hotjar.com",
+        "sentry.io",
+        "clarity.ms",
+        "segment.com",
+        "mixpanel.com",
+        "intercom.io",
+        "amplitude.com",
+        "cdn.segment.com",
+        "adsct"
+    ]
+
     def handle_response(response):
 
         try:
@@ -7562,6 +7641,17 @@ def api_validation_test(page):
                 "xhr",
                 "fetch"
             ]:
+                return
+
+            # Skip third-party tracking/analytics calls - these are
+            # not the website's own API and shouldn't count toward
+            # its API health score.
+            response_url_lower = response.url.lower()
+
+            if any(
+                domain in response_url_lower
+                for domain in THIRD_PARTY_TRACKER_DOMAINS
+            ):
                 return
 
             status_code = response.status
@@ -9896,6 +9986,12 @@ def functional_testing(url):
             if result.get("status") == "SKIPPED"
         )
 
+        partial = sum(
+            1
+            for result in results
+            if result.get("status") == "PARTIAL"
+        )
+
         tested_modules = passed + failed
 
         if tested_modules > 0:
@@ -9938,6 +10034,10 @@ def functional_testing(url):
 
         print(
             f"Skipped           : {skipped}"
+        )
+
+        print(
+            f"Partial           : {partial}"
         )
 
         print(
@@ -9990,6 +10090,8 @@ def functional_testing(url):
 
             "skipped": skipped,
 
+            "partial": partial,
+
             "tested_modules": tested_modules,
 
             "executed_modules": executed_modules,
@@ -10033,6 +10135,12 @@ def functional_testing(url):
             if result.get("status") == "SKIPPED"
         )
 
+        partial = sum(
+            1
+            for result in results
+            if result.get("status") == "PARTIAL"
+        )
+
         tested_modules = passed + failed
 
         if tested_modules > 0:
@@ -10056,6 +10164,8 @@ def functional_testing(url):
             "not_available": not_available,
 
             "skipped": skipped,
+
+            "partial": partial,
 
             "tested_modules": tested_modules,
 

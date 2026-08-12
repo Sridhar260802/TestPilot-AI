@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models.website_test import WebsiteTest
+from app.models.website_test import WebsiteTest, FunctionalTestResult
 import json
 
 
@@ -62,6 +62,63 @@ def get_all_website_tests(db: Session):
         db.query(WebsiteTest)
 
         .order_by(WebsiteTest.id.desc())
+
+        .all()
+
+    )
+
+
+def save_functional_test_result(
+    db: Session,
+    url: str,
+    functional: dict
+):
+
+    obj = FunctionalTestResult(
+
+        url=url,
+
+        functional_score=functional.get("functional_score", 0),
+
+        total_modules=functional.get("total_modules", 0),
+
+        executed_modules=functional.get("executed_modules", 0),
+
+        tested_modules=functional.get(
+            "tested_modules",
+            functional.get("passed", 0) + functional.get("failed", 0)
+        ),
+
+        passed=functional.get("passed", 0),
+
+        failed=functional.get("failed", 0),
+
+        partial=functional.get("partial", 0),
+
+        skipped=functional.get("skipped", 0),
+
+        not_available=functional.get("not_available", 0),
+
+        results_json=json.dumps(functional.get("results", []))
+
+    )
+
+    db.add(obj)
+
+    db.commit()
+
+    db.refresh(obj)
+
+    return obj
+
+
+def get_all_functional_test_results(db: Session):
+
+    return (
+
+        db.query(FunctionalTestResult)
+
+        .order_by(FunctionalTestResult.id.desc())
 
         .all()
 

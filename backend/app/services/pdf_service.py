@@ -56,20 +56,17 @@ def clean_issue_text(issue):
 
 def get_grade(score):
 
-    if score >= 90:
-        return "A+"
-
-    elif score >= 80:
-        return "A"
-
-    elif score >= 70:
+    if score >= 80:
         return "B"
 
     elif score >= 60:
         return "C"
 
-    else:
+    elif score >= 40:
         return "D"
+
+    else:
+        return "F"
 
 
 

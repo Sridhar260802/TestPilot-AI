@@ -1,7 +1,15 @@
-from turtle import update
-
+from app.database.dependency import get_db
 from fastapi import APIRouter, Depends, security
+
+from app.core.auth import get_current_user
+from app.models.user import User
+from app.core.auth import get_current_user
+from app.models.user import User
 from sqlalchemy.orm import Session
+from app.database.dependency import get_db
+from app.core.auth import get_current_user
+from app.models.user import User
+from fastapi import HTTPException
 from app.services.advanced_seo_service import advanced_seo_check
 from app.database.dependency import get_db
 from app.schemas.website_test import WebsiteTestRequest
@@ -21,10 +29,14 @@ from app.services.website_db_service import (
     save_website_test,
     get_all_website_tests,
 )
+from app.core.auth import get_current_user
 from app.services.advanced_seo_service import advanced_seo_check
 from app.services.ai_analysis_service import generate_website_ai_review
 from app.services.functional_testing_service import functional_testing
-from app.services.seo_module14 import seo_module14
+from app.services.security_testing import (
+    security_audit,
+    generate_security_pdf
+)
 router = APIRouter(
     prefix="/website",
     tags=["Website Testing"]
@@ -82,10 +94,12 @@ def website_test(
     Return JSON only.
     """
 
+    broken_links = check_broken_links(data.url)
+
     ai = generate_website_ai_review(
         url=data.url,
         health_score=result.get("health_score",0),
-        broken_links=check_broken_links(data.url),
+        broken_links=broken_links,
         seo=seo,
         accessibility=accessibility,
         performance=performance,
@@ -112,9 +126,21 @@ def website_test(
 
         url=data.url,
 
-        result=result,
+        website=result,
 
-        ai_review=ai
+        seo=seo,
+
+        accessibility=accessibility,
+
+        performance=performance,
+
+        security=security,
+
+        broken=broken_links,
+
+        ai=ai,
+
+        severity=calculate_website_severity(result.get("health_score", 0))
 
     )
     update_dashboard_stats(
@@ -266,3 +292,23 @@ def security_test(data: WebsiteTestRequest):
 def functional_test(data: WebsiteTestRequest):
 
     return functional_testing(data.url)
+
+@router.post("/security_audit")
+def security_audit_test(
+    data: WebsiteTestRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    report = security_audit(
+        data.url,
+        db,
+        current_user.id
+    )
+
+    pdf_path = generate_security_pdf(report)
+
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename="TestPilot_Security_Audit_Report.pdf"
+    )
