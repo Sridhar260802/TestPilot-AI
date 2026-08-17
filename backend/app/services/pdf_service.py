@@ -85,7 +85,7 @@ def create_styles():
             parent=styles["Title"],
             alignment=TA_CENTER,
             fontSize=22,
-            textColor=colors.HexColor("#1F4E79"),
+            textColor=colors.HexColor("#495B16"),   # Crosbytech olive
             spaceAfter=15
         ),
 
@@ -94,7 +94,7 @@ def create_styles():
             "heading",
             parent=styles["Heading2"],
             fontSize=14,
-            textColor=colors.HexColor("#0B5394"),   # Dark Blue
+            textColor=colors.HexColor("#495B16"),   # Crosbytech olive
             spaceBefore=8,
             spaceAfter=6
         ),

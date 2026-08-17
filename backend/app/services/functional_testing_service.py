@@ -8438,7 +8438,7 @@ def browser_compatibility_test(playwright, url):
             # ----------------------------------------
 
             page.wait_for_timeout(
-                3000
+               6000
             )
 
             # ----------------------------------------

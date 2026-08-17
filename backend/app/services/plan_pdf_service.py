@@ -16,6 +16,19 @@ from reportlab.lib.styles import ParagraphStyle
 
 from app.services.pdf_service import create_styles, get_grade, add_page_number
 from app.services.security_testing import SEVERITY_COLORS, severity_rank
+from app.services.report_template import (
+    build_report_header,
+    section_heading,
+    summary_scores_table,
+    functional_summary_bar,
+    module_status_table,
+    format_ai_recommendations,
+    footer_note,
+    OLIVE_ACCENT,
+    OLIVE_LIGHT_BG,
+    ROW_ALT_BG,
+    BORDER_GREY,
+)
 
 
 def _status_line(label, score):
@@ -184,7 +197,7 @@ def _full_security_section(security, heading, normal):
         ]
         t = Table(ssl_table_data, colWidths=[45 * mm, 125 * mm], repeatRows=1)
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E79")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#759123")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CFD8DC")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -213,7 +226,7 @@ def _full_security_section(security, heading, normal):
         ]
         t = Table(dns_table_data, colWidths=[45 * mm, 125 * mm], repeatRows=1)
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4527A0")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#8D6E63")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CFD8DC")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -291,7 +304,7 @@ def _full_security_section(security, heading, normal):
             ])
         t = Table(path_data, colWidths=[70 * mm, 35 * mm, 30 * mm, 35 * mm], repeatRows=1)
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#455A64")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#495B16")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CFD8DC")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -317,7 +330,7 @@ def _full_security_section(security, heading, normal):
             ])
         t = Table(cookie_data, colWidths=[60 * mm, 35 * mm, 35 * mm, 40 * mm], repeatRows=1)
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#455A64")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#495B16")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CFD8DC")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -353,69 +366,59 @@ def generate_basic_pdf_report(data, filename="Basic_Website_Report.pdf"):
     content = data.get("content_validation", {})
     image = data.get("image_validation", {})
 
-    header = Table(
-        [[Paragraph("<b>Crosbytech</b><br/>Basic Plan Website Report", title)]],
-        colWidths=[450],
+    story.extend(
+        build_report_header(
+            subtitle_text="Professional Website Audit &amp; Analysis - Basic Plan",
+            url=data.get("url", ""),
+            generated_str=datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+            plan_level="Basic",
+        )
     )
-    header.setStyle(
-        TableStyle(
+
+    story.append(section_heading("1. Summary Scores"))
+    story.append(Spacer(1, 0.12 * inch))
+    availability_score = 100 if str(website.get("test_status", "")).upper() == "PASS" else 0
+    story.append(
+        summary_scores_table(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EAF2F8")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#1F4E79")),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("Availability (HTTP " + str(website.get("status_code", "N/A")) + ")", availability_score, None),
+                ("SEO Score", seo.get("seo_score", 0), get_grade(seo.get("seo_score", 0))),
+                ("Performance Score", performance.get("performance_score", 0), get_grade(performance.get("performance_score", 0))),
+                ("Accessibility Score", accessibility.get("accessibility_score", 0), get_grade(accessibility.get("accessibility_score", 0))),
+                ("Content Score", content.get("content_score", 0), get_grade(content.get("content_score", 0))),
+                ("Image Score", image.get("image_score", 0), get_grade(image.get("image_score", 0))),
             ]
         )
     )
-    story.append(header)
-    story.append(Spacer(1, 0.3 * inch))
-
-    story.append(
-        Paragraph(
-            f"<b>Website URL :</b> {data.get('url', '')}<br/>"
-            f"<b>Generated :</b> {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}<br/>"
-            f"<b>Plan :</b> Basic",
-            normal,
-        )
-    )
     story.append(Spacer(1, 0.25 * inch))
 
-    story.append(Paragraph("Summary Scores", heading))
-    story.append(
-        Paragraph(
-            f"<b>Availability :</b> {website.get('test_status', 'Unknown')} "
-            f"(HTTP {website.get('status_code', 'N/A')})<br/>"
-            f"{_status_line('SEO Score', seo.get('seo_score', 0))}<br/>"
-            f"{_status_line('Performance Score', performance.get('performance_score', 0))}<br/>"
-            f"{_status_line('Accessibility Score', accessibility.get('accessibility_score', 0))}<br/>"
-            f"{_status_line('Content Score', content.get('content_score', 0))}<br/>"
-            f"{_status_line('Image Score', image.get('image_score', 0))}",
-            normal,
-        )
-    )
-    story.append(Spacer(1, 0.25 * inch))
-
-    story.append(Paragraph("Basic SEO Findings", heading))
+    story.append(section_heading("2. Basic SEO Findings"))
+    story.append(Spacer(1, 0.1 * inch))
     story.extend(_issues_block("SEO Issues", seo.get("issues", []), normal))
 
-    story.append(Paragraph("Basic Accessibility Findings", heading))
+    story.append(section_heading("3. Basic Accessibility Findings"))
+    story.append(Spacer(1, 0.1 * inch))
     story.extend(
         _issues_block("Accessibility Issues", accessibility.get("issues", []), normal)
     )
 
-    story.append(Paragraph("Basic Performance Findings", heading))
+    story.append(section_heading("4. Basic Performance Findings"))
+    story.append(Spacer(1, 0.1 * inch))
     story.extend(
         _issues_block("Performance Issues", performance.get("issues", []), normal)
     )
 
-    story.append(Paragraph("Basic Content Validation", heading))
+    story.append(section_heading("5. Basic Content Validation"))
+    story.append(Spacer(1, 0.1 * inch))
     story.extend(_issues_block("Content Issues", content.get("issues", []), normal))
 
-    story.append(Paragraph("Basic Image Validation", heading))
+    story.append(section_heading("6. Basic Image Validation"))
+    story.append(Spacer(1, 0.1 * inch))
     story.extend(_issues_block("Image Issues", image.get("issues", []), normal))
 
-    story.append(Spacer(1, 0.2 * inch))
+    story.append(Spacer(1, 0.15 * inch))
     story.append(
-        Paragraph(
+        footer_note(
             "Upgrade to the Standard plan for functional testing, advanced SEO, "
             "advanced accessibility, API validation and AI-powered recommendations. "
             "Upgrade to Premium for a full security audit.",
@@ -460,46 +463,31 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
     cro_audit_data = data.get("cro", {})
     technical_audit_data = data.get("technical", {})
 
-    header = Table(
-        [[Paragraph("<b>Crosbytech</b><br/>Premium Plan Full Report", title)]],
-        colWidths=[450],
+    story.extend(
+        build_report_header(
+            subtitle_text="Professional Website Audit &amp; Analysis - Premium Plan",
+            url=data.get("url", ""),
+            generated_str=datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+            plan_level="Premium",
+        )
     )
-    header.setStyle(
-        TableStyle(
+
+    story.append(section_heading("1. Summary Scores"))
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(
+        summary_scores_table(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EAF2F8")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#1F4E79")),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("Website Health", website.get("health_score", 0), None),
+                ("Advanced SEO Score", seo.get("seo_score", 0), get_grade(seo.get("seo_score", 0))),
+                ("Accessibility Score", accessibility.get("accessibility_score", 0), get_grade(accessibility.get("accessibility_score", 0))),
+                ("Performance Score", performance.get("performance_score", 0), get_grade(performance.get("performance_score", 0))),
+                ("Functional Score", functional.get("functional_score", 0), get_grade(functional.get("functional_score", 0))),
+                ("Security Score", security.get("security_score", 0), get_grade(security.get("security_score", 0))),
+                ("Content Score", content_audit_data.get("content_score", 0), get_grade(content_audit_data.get("content_score", 0))),
+                ("UX Score", ux_audit_data.get("ux_score", 0), get_grade(ux_audit_data.get("ux_score", 0))),
+                ("CRO Score", cro_audit_data.get("cro_score", 0), get_grade(cro_audit_data.get("cro_score", 0))),
+                ("Technical Score", technical_audit_data.get("technical_score", 0), get_grade(technical_audit_data.get("technical_score", 0))),
             ]
-        )
-    )
-    story.append(header)
-    story.append(Spacer(1, 0.3 * inch))
-
-    story.append(
-        Paragraph(
-            f"<b>Website URL :</b> {data.get('url', '')}<br/>"
-            f"<b>Generated :</b> {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}<br/>"
-            f"<b>Plan :</b> Premium",
-            normal,
-        )
-    )
-    story.append(Spacer(1, 0.25 * inch))
-
-    story.append(Paragraph("Summary Scores", heading))
-    story.append(
-        Paragraph(
-            f"<b>Website Health :</b> {website.get('health_score', 0)}/100<br/>"
-            f"{_status_line('Advanced SEO Score', seo.get('seo_score', 0))}<br/>"
-            f"{_status_line('Accessibility Score', accessibility.get('accessibility_score', 0))}<br/>"
-            f"{_status_line('Performance Score', performance.get('performance_score', 0))}<br/>"
-            f"{_status_line('Functional Score', functional.get('functional_score', 0))}<br/>"
-            f"{_status_line('Security Score', security.get('security_score', 0))}<br/>"
-            f"{_status_line('Content Score', content_audit_data.get('content_score', 0))}<br/>"
-            f"{_status_line('UX Score', ux_audit_data.get('ux_score', 0))}<br/>"
-            f"{_status_line('CRO Score', cro_audit_data.get('cro_score', 0))}<br/>"
-            f"{_status_line('Technical Score', technical_audit_data.get('technical_score', 0))}",
-            normal,
         )
     )
     story.append(Spacer(1, 0.25 * inch))
@@ -510,37 +498,53 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
         functional.get("passed", 0) + functional.get("failed", 0),
     )
 
-    story.append(Paragraph("Functional Testing Summary", heading))
+    story.append(section_heading("2. Functional Testing Summary"))
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(
+        functional_summary_bar(
+            tested_modules,
+            functional.get("total_modules", 0),
+            functional.get("passed", 0),
+            functional.get("failed", 0),
+            functional.get("partial", 0),
+            functional.get("skipped", 0),
+        )
+    )
+    story.append(Spacer(1, 0.1 * inch))
     story.append(
         Paragraph(
-            f"<b>Modules Executed :</b> {tested_modules} / "
-            f"{functional.get('total_modules', 0)}<br/>"
-            f"<b>Passed :</b> {functional.get('passed', 0)} &nbsp;&nbsp;"
-            f"<b>Failed :</b> {functional.get('failed', 0)} &nbsp;&nbsp;"
-            f"<b>Partial :</b> {functional.get('partial', 0)} &nbsp;&nbsp;"
-            f"<b>Skipped :</b> {functional.get('skipped', 0)}<br/><br/>"
             "Covers: navigation &amp; link testing, forms &amp; validation, "
             "authentication testing, responsive testing, browser compatibility, "
             "broken resource testing, console error detection and API validation.",
             normal,
         )
     )
-    story.append(Spacer(1, 0.2 * inch))
+    story.append(Spacer(1, 0.15 * inch))
+
+    module_rows = [
+        (
+            m.get("module", "Module"),
+            m.get("status", "N/A"),
+            m.get("issue", "") if m.get("status") == "FAIL" else "",
+        )
+        for m in functional.get("results", [])
+    ]
+    if module_rows:
+        story.append(module_status_table(module_rows))
+        story.append(Spacer(1, 0.15 * inch))
 
     for module_result in functional.get("results", []):
         module_name = module_result.get("module", "Module")
         status = module_result.get("status", "N/A")
-        story.append(Paragraph(f"&bull; <b>{module_name}</b>: {status}", normal))
 
         if status == "FAIL":
 
-            issue_summary = module_result.get("issue")
-            if issue_summary:
-                story.append(
-                    Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{issue_summary}", normal)
-                )
-
             detail_items, total_found = _extract_failure_details(module_result)
+
+            if detail_items:
+                story.append(
+                    Paragraph(f"<b>{module_name} - failing items</b>", normal)
+                )
 
             for item in detail_items:
                 story.append(
@@ -559,11 +563,14 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
     story.append(Spacer(1, 0.25 * inch))
 
     # ---------------- PREMIUM SECTION: SECURITY AUDIT (full detail) ----------------
+    story.append(section_heading("3. Security &amp; Infrastructure Audit"))
+    story.append(Spacer(1, 0.12 * inch))
     story.extend(_full_security_section(security, heading, normal))
     story.append(Spacer(1, 0.25 * inch))
 
     # ---------------- PREMIUM SECTION: CONTENT AUDIT ----------------
-    story.append(Paragraph("Content Audit", heading))
+    story.append(section_heading("4. Content Audit"))
+    story.append(Spacer(1, 0.12 * inch))
     story.append(
         Paragraph(
             f"<b>Word Count :</b> {content_audit_data.get('word_count', 0)} &nbsp;&nbsp;"
@@ -581,7 +588,8 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
     story.append(Spacer(1, 0.25 * inch))
 
     # ---------------- PREMIUM SECTION: UX AUDIT ----------------
-    story.append(Paragraph("User Experience (UX) Audit", heading))
+    story.append(section_heading("5. User Experience (UX) Audit"))
+    story.append(Spacer(1, 0.12 * inch))
     story.append(
         Paragraph(
             f"<b>Navigation Present :</b> {ux_audit_data.get('has_navigation', False)} &nbsp;&nbsp;"
@@ -599,7 +607,8 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
     story.append(Spacer(1, 0.25 * inch))
 
     # ---------------- PREMIUM SECTION: CRO AUDIT ----------------
-    story.append(Paragraph("Conversion Rate Optimization (CRO) Audit", heading))
+    story.append(section_heading("6. Conversion Rate Optimization (CRO) Audit"))
+    story.append(Spacer(1, 0.12 * inch))
     story.append(
         Paragraph(
             f"<b>CTA Above the Fold :</b> {cro_audit_data.get('cta_above_fold', False)}<br/>"
@@ -617,7 +626,8 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
     story.append(Spacer(1, 0.25 * inch))
 
     # ---------------- PREMIUM SECTION: TECHNICAL AUDIT ----------------
-    story.append(Paragraph("Technical Audit", heading))
+    story.append(section_heading("7. Technical Audit"))
+    story.append(Spacer(1, 0.12 * inch))
     crawl = technical_audit_data.get("crawl", {})
     caching = technical_audit_data.get("caching_and_compression", {})
     vitals = technical_audit_data.get("core_web_vitals", {})
@@ -640,8 +650,9 @@ def generate_premium_pdf_report(data, filename="Premium_Website_Report.pdf"):
     story.append(Spacer(1, 0.25 * inch))
 
     # ---------------- AI RECOMMENDATIONS (moved to the end) ----------------
-    story.append(Paragraph("AI Recommendations", heading))
-    story.append(Paragraph(str(ai_suggestions) or "No AI suggestions generated.", normal))
+    story.append(section_heading("8. AI Recommendations &amp; Developer Action Items"))
+    story.append(Spacer(1, 0.12 * inch))
+    story.extend(format_ai_recommendations(ai_suggestions, normal))
 
     doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
 
@@ -668,41 +679,26 @@ def generate_standard_pdf_report(data, filename="Standard_Website_Report.pdf"):
     functional = data.get("functional", {})
     ai_suggestions = data.get("ai_suggestions", "")
 
-    header = Table(
-        [[Paragraph("<b>Crosbytech</b><br/>Standard Plan Detailed Report", title)]],
-        colWidths=[450],
+    story.extend(
+        build_report_header(
+            subtitle_text="Professional Website Audit &amp; Analysis - Standard Plan",
+            url=data.get("url", ""),
+            generated_str=datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+            plan_level="Standard",
+        )
     )
-    header.setStyle(
-        TableStyle(
+
+    story.append(section_heading("1. Summary Scores"))
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(
+        summary_scores_table(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EAF2F8")),
-                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#1F4E79")),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("Website Health", website.get("health_score", 0), None),
+                ("Advanced SEO Score", seo.get("seo_score", 0), get_grade(seo.get("seo_score", 0))),
+                ("Accessibility Score", accessibility.get("accessibility_score", 0), get_grade(accessibility.get("accessibility_score", 0))),
+                ("Performance Score", performance.get("performance_score", 0), get_grade(performance.get("performance_score", 0))),
+                ("Functional Score", functional.get("functional_score", 0), get_grade(functional.get("functional_score", 0))),
             ]
-        )
-    )
-    story.append(header)
-    story.append(Spacer(1, 0.3 * inch))
-
-    story.append(
-        Paragraph(
-            f"<b>Website URL :</b> {data.get('url', '')}<br/>"
-            f"<b>Generated :</b> {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}<br/>"
-            f"<b>Plan :</b> Standard",
-            normal,
-        )
-    )
-    story.append(Spacer(1, 0.25 * inch))
-
-    story.append(Paragraph("Summary Scores", heading))
-    story.append(
-        Paragraph(
-            f"<b>Website Health :</b> {website.get('health_score', 0)}/100<br/>"
-            f"{_status_line('Advanced SEO Score', seo.get('seo_score', 0))}<br/>"
-            f"{_status_line('Accessibility Score', accessibility.get('accessibility_score', 0))}<br/>"
-            f"{_status_line('Performance Score', performance.get('performance_score', 0))}<br/>"
-            f"{_status_line('Functional Score', functional.get('functional_score', 0))}",
-            normal,
         )
     )
     story.append(Spacer(1, 0.25 * inch))
@@ -712,37 +708,53 @@ def generate_standard_pdf_report(data, filename="Standard_Website_Report.pdf"):
         functional.get("passed", 0) + functional.get("failed", 0),
     )
 
-    story.append(Paragraph("Functional Testing Summary", heading))
+    story.append(section_heading("2. Functional Testing Summary"))
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(
+        functional_summary_bar(
+            tested_modules,
+            functional.get("total_modules", 0),
+            functional.get("passed", 0),
+            functional.get("failed", 0),
+            functional.get("partial", 0),
+            functional.get("skipped", 0),
+        )
+    )
+    story.append(Spacer(1, 0.1 * inch))
     story.append(
         Paragraph(
-            f"<b>Modules Executed :</b> {tested_modules} / "
-            f"{functional.get('total_modules', 0)}<br/>"
-            f"<b>Passed :</b> {functional.get('passed', 0)} &nbsp;&nbsp;"
-            f"<b>Failed :</b> {functional.get('failed', 0)} &nbsp;&nbsp;"
-            f"<b>Partial :</b> {functional.get('partial', 0)} &nbsp;&nbsp;"
-            f"<b>Skipped :</b> {functional.get('skipped', 0)}<br/><br/>"
             "Covers: navigation &amp; link testing, forms &amp; validation, "
             "authentication testing, responsive testing, browser compatibility, "
             "broken resource testing, console error detection and API validation.",
             normal,
         )
     )
-    story.append(Spacer(1, 0.2 * inch))
+    story.append(Spacer(1, 0.15 * inch))
+
+    module_rows = [
+        (
+            m.get("module", "Module"),
+            m.get("status", "N/A"),
+            m.get("issue", "") if m.get("status") == "FAIL" else "",
+        )
+        for m in functional.get("results", [])
+    ]
+    if module_rows:
+        story.append(module_status_table(module_rows))
+        story.append(Spacer(1, 0.15 * inch))
 
     for module_result in functional.get("results", []):
         module_name = module_result.get("module", "Module")
         status = module_result.get("status", "N/A")
-        story.append(Paragraph(f"&bull; <b>{module_name}</b>: {status}", normal))
 
         if status == "FAIL":
 
-            issue_summary = module_result.get("issue")
-            if issue_summary:
-                story.append(
-                    Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{issue_summary}", normal)
-                )
-
             detail_items, total_found = _extract_failure_details(module_result)
+
+            if detail_items:
+                story.append(
+                    Paragraph(f"<b>{module_name} - failing items</b>", normal)
+                )
 
             for item in detail_items:
                 story.append(
@@ -759,12 +771,13 @@ def generate_standard_pdf_report(data, filename="Standard_Website_Report.pdf"):
                 )
 
     story.append(Spacer(1, 0.25 * inch))
-    story.append(Paragraph("AI Recommendations", heading))
-    story.append(Paragraph(str(ai_suggestions) or "No AI suggestions generated.", normal))
+    story.append(section_heading("3. AI Recommendations"))
+    story.append(Spacer(1, 0.1 * inch))
+    story.extend(format_ai_recommendations(ai_suggestions, normal))
 
-    story.append(Spacer(1, 0.2 * inch))
+    story.append(Spacer(1, 0.15 * inch))
     story.append(
-        Paragraph(
+        footer_note(
             "Upgrade to Premium for a full security audit (SSL/TLS, headers, "
             "cookies, CORS, sensitive paths and more) delivered as JSON and PDF.",
             normal,
