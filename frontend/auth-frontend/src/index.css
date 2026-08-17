@@ -1,0 +1,8 @@
+/* src/index.css */
+/* If your project already has an index.css with your own styles,
+   just add these 3 lines to the TOP of your existing file instead
+   of replacing it entirely. */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

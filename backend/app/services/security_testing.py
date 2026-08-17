@@ -27,9 +27,11 @@ import socket
 import json
 import fnmatch
 import datetime
+import uuid
 from urllib.parse import urlparse, urljoin
 
 import requests
+from bs4 import BeautifulSoup
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -1167,6 +1169,125 @@ def exposed_secrets_scan(response):
 
 
 # ============================================================
+# [PREMIUM] MALWARE DETECTION
+# ------------------------------------------------------------
+# Passive, signature/heuristic based malware scan of the page
+# response - no third-party scanning API required. Flags the
+# indicators most commonly left behind by a compromised or
+# infected website:
+#   - script tags loaded from known malware / cryptomining hosts
+#   - obfuscated JavaScript (eval+unescape/atob, long
+#     String.fromCharCode chains) typically used to hide a payload
+#   - hidden / zero-size iframes, a classic drive-by-download and
+#     malvertising injection technique
+#   - silent meta-refresh redirects to a different domain
+# This complements (does not replace) a full engine-based malware
+# scan, and degrades gracefully - a parse failure is reported as
+# an informational check rather than crashing the whole audit.
+# ============================================================
+
+MALWARE_SCRIPT_DOMAINS = [
+    "coinhive.com", "coin-hive.com", "cryptoloot.pro", "crypto-loot.com",
+    "authedmine.com", "webminepool.com", "minero.cc", "jsecoin.com",
+    "coinimp.com", "webmine.pro", "moneropay.win", "deepminer.info",
+    "coinerra.com", "minemytraffic.com", "projectpoi.com",
+]
+
+MALWARE_JS_PATTERNS = {
+    "Obfuscated eval(unescape/atob(...))": re.compile(r"eval\s*\(\s*(unescape|atob)\s*\("),
+    "Obfuscated document.write(unescape(...))": re.compile(r"document\.write\s*\(\s*unescape\s*\("),
+    "Long String.fromCharCode obfuscation chain": re.compile(
+        r"(String\.fromCharCode\s*\([^)]*\)\s*[+,]\s*){8,}"
+    ),
+    "Hidden iframe (display:none/visibility:hidden)": re.compile(
+        r"<iframe[^>]*style=[\"'][^\"']*(display\s*:\s*none|visibility\s*:\s*hidden)[^\"']*[\"']",
+        re.IGNORECASE,
+    ),
+    "Zero-size iframe (width=0/height=0)": re.compile(
+        r'<iframe(?=[^>]*\bwidth=["\']?0["\']?)(?=[^>]*\bheight=["\']?0["\']?)[^>]*>',
+        re.IGNORECASE,
+    ),
+}
+
+
+def malware_detection_audit(response, base_url):
+    """
+    Runs the passive malware heuristics above against a fetched page and
+    returns a list of `make_check(...)` results, ready for `bucket_check`.
+    """
+
+    try:
+        content = response.text
+    except Exception as e:
+        return [make_check("Malware Detection", "INFO", "INFO",
+                            f"Could not read page content for malware scan: {e}", "")]
+
+    checks = []
+
+    # ---- known malicious / cryptomining script sources ----
+    try:
+        soup = BeautifulSoup(content, "html.parser")
+        script_srcs = [tag.get("src") for tag in soup.find_all("script") if tag.get("src")]
+    except Exception:
+        script_srcs = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', content, re.IGNORECASE)
+
+    malicious_scripts = [
+        src for src in script_srcs
+        if any(domain in src.lower() for domain in MALWARE_SCRIPT_DOMAINS)
+    ]
+    if malicious_scripts:
+        checks.append(make_check(
+            "Cryptomining / Known Malicious Script Source", "FAIL", "CRITICAL",
+            f"Script(s) loaded from known malicious/cryptomining domains: {', '.join(malicious_scripts[:5])}",
+            "Remove the malicious script tag(s) immediately, audit the site's files/CMS plugins for "
+            "compromise, and rotate any admin/API credentials that may have been exposed."
+        ))
+    else:
+        checks.append(make_check("Cryptomining / Known Malicious Script Source", "PASS", "INFO",
+                                  "No script tags referencing known malicious/cryptomining domains were found.", ""))
+
+    # ---- obfuscated script / hidden iframe patterns ----
+    obf_findings = [label for label, pattern in MALWARE_JS_PATTERNS.items() if pattern.search(content)]
+    if obf_findings:
+        checks.append(make_check(
+            "Obfuscated Script / Hidden Iframe Patterns", "FAIL", "HIGH",
+            f"Pattern(s) commonly associated with malware injection found in page source: {', '.join(obf_findings)}",
+            "Manually inspect the flagged script blocks and iframes. Obfuscated eval/unescape/atob or "
+            "fromCharCode chains and hidden zero-size iframes are common indicators of a website "
+            "compromise, malicious ad injection, or a drive-by-download attempt."
+        ))
+    else:
+        checks.append(make_check("Obfuscated Script / Hidden Iframe Patterns", "PASS", "INFO",
+                                  "No obfuscated script or hidden-iframe patterns detected in page source.", ""))
+
+    # ---- silent cross-domain meta-refresh redirect ----
+    meta_redirect = re.search(
+        r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\'][^"\']*url=([^"\'>]+)',
+        content, re.IGNORECASE,
+    )
+    if meta_redirect:
+        target = meta_redirect.group(1).strip()
+        target_host = urlparse(target).hostname if "://" in target else urlparse(base_url).hostname
+        source_host = urlparse(base_url).hostname
+        if target_host and source_host and target_host != source_host:
+            checks.append(make_check(
+                "Unsolicited Cross-Domain Redirect", "FAIL", "MEDIUM",
+                f"A meta-refresh tag silently redirects visitors to a different domain ({target_host}).",
+                "Remove the unexpected redirect or confirm it is intentional. Unannounced cross-domain "
+                "redirects are a common symptom of a hijacked or infected site being used to funnel "
+                "traffic elsewhere."
+            ))
+        else:
+            checks.append(make_check("Unsolicited Cross-Domain Redirect", "PASS", "INFO",
+                                      "No cross-domain meta-refresh redirect detected.", ""))
+    else:
+        checks.append(make_check("Unsolicited Cross-Domain Redirect", "PASS", "INFO",
+                                  "No meta-refresh redirect detected.", ""))
+
+    return checks
+
+
+# ============================================================
 # MAIN SECURITY AUDIT
 # ============================================================
 
@@ -1367,6 +1488,12 @@ def security_audit(url,db,user_id):
     print("[20] EXPOSED SECRETS IN PAGE SOURCE AUDIT")
     bucket_check(exposed_secrets_scan(response), passed_checks, failed_checks)
 
+    # ---------------- [PREMIUM] MALWARE DETECTION ----------------
+    print("[21] MALWARE DETECTION")
+    malware_checks = malware_detection_audit(response, response.url)
+    for check in malware_checks:
+        bucket_check(check, passed_checks, failed_checks)
+
     # ---------------- CERTIFICATE DETAILED CHECKS ----------------
     certificate_checks = []
     days_remaining = certificate.get("days_remaining")
@@ -1448,6 +1575,10 @@ def security_audit(url,db,user_id):
         "sensitive_paths": sensitive_paths,
         "mixed_content": mixed_content,
         "cache_control": response.headers.get("Cache-Control"),
+        "malware_detection": {
+            "checks": malware_checks,
+            "status": "CLEAN" if all(c["status"] == "PASS" for c in malware_checks) else "FLAGGED",
+        },
         "dns": dns_result,
         "dnssec": dnssec_result,
         "whois": whois_result,
@@ -1480,14 +1611,17 @@ def security_audit(url,db,user_id):
     print("\n===========================================\n")
 
     # ---------------- SAVE JSON ----------------
+    # Unique per-audit filename - previously this was a fixed name that
+    # every audit (from every user) overwrote, so old reports vanished.
+    report_id = f"{user_id}_{uuid.uuid4().hex}"
     os.makedirs("security_reports", exist_ok=True)
-    json_path = os.path.join("security_reports", "security_audit_report_v3.json")
+    json_path = os.path.join("security_reports", f"security_audit_report_{report_id}.json")
     with open(json_path, "w", encoding="utf-8") as file:
         json.dump(result, file, indent=4, ensure_ascii=False, default=str)
     print(f"JSON report saved : {json_path}")
 
     # ---------------- GENERATE PDF ----------------
-    pdf_path = generate_security_pdf(result, client_name="Client")
+    pdf_path = generate_security_pdf(result, client_name="Client", report_id=report_id)
     result["pdf_report"] = pdf_path
     # ---------------- SAVE SECURITY AUDIT TO DATABASE ----------------
     try:
@@ -1517,6 +1651,9 @@ def security_audit(url,db,user_id):
 # ============================================================
 # PDF REPORT  (professional layout)
 # ============================================================
+
+from app.services.groq_service import generate_ai_suggestions
+
 
 def _p(text, style):
     """Wrap arbitrary text safely in a Paragraph so table cells wrap."""
@@ -1585,9 +1722,61 @@ def _header_footer(canvas_obj, doc, report):
     canvas_obj.restoreState()
 
 
-def generate_security_pdf(report, client_name="Client"):
+def _generate_security_ai_suggestions(report: dict) -> str:
+    """
+    Builds an overall AI-written review of the security audit: what the
+    biggest risks are, why they matter, and what to fix first. Falls back
+    to a plain-text summary if the AI call fails (no key, network issue,
+    etc.) so the report still generates.
+    """
+    summary = report.get("summary", {})
+    issues = sorted(
+        report.get("issues", []),
+        key=lambda i: -severity_rank(i.get("severity"))
+    )
+    top_issues = issues[:12]
+
+    issues_text = "\n".join(
+        f"- [{i.get('severity','')}] {i.get('title','')}: {i.get('details','')}"
+        for i in top_issues
+    ) or "No failing checks."
+
+    prompt = f"""
+    You are a security analyst summarizing an automated web security audit for a client.
+
+    Target: {report.get("url", "")}
+    Overall Security Score: {report.get("security_score", 0)}%
+    Risk Status: {report.get("status", "N/A")}
+    Total Checks: {summary.get("total_checks", 0)} | Passed: {summary.get("passed_checks", 0)} | Failed: {summary.get("failed_checks", 0)}
+    Critical: {summary.get("critical", 0)} | High: {summary.get("high", 0)} | Medium: {summary.get("medium", 0)} | Low: {summary.get("low", 0)}
+
+    Failing checks (highest severity first):
+    {issues_text}
+
+    Write a concise overall review covering:
+    1. Overall security posture in plain language.
+    2. The most business-critical risks and why they matter.
+    3. A prioritized remediation order (what to fix first, next, later).
+    4. Any quick wins that are low effort but high impact.
+
+    Keep it to a few short paragraphs, no markdown headers, no bullet symbols other than plain text.
+    """
+
+    try:
+        return generate_ai_suggestions(prompt)
+    except Exception as e:
+        return (
+            "AI-generated overall review is unavailable right now "
+            f"({str(e)}). Based on the automated findings above, prioritize "
+            "the Critical and High severity issues first, then work through "
+            "Medium and Low severity items."
+        )
+
+
+def generate_security_pdf(report, client_name="Client", report_id=None):
     os.makedirs("security_reports", exist_ok=True)
-    pdf_path = os.path.join("security_reports", "advanced_security_audit_report_v3.pdf")
+    suffix = report_id or uuid.uuid4().hex
+    pdf_path = os.path.join("security_reports", f"advanced_security_audit_report_{suffix}.pdf")
 
     document = SimpleDocTemplate(
         pdf_path, pagesize=A4,
@@ -1613,13 +1802,13 @@ def generate_security_pdf(report, client_name="Client"):
 
     story = []
 
-    # =========================== COVER PAGE ===========================
-    story.append(Spacer(1, 28 * mm))
+    # =========================== HEADER / SUMMARY (page 1, no separate cover page) ===========================
+    story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(BRAND_NAME, subtitle_style))
     story.append(Spacer(1, 4))
     story.append(Paragraph(" Security Audit Report", title_style))
     story.append(Paragraph("Web Application &amp; Infrastructure Assessment", subtitle_style))
-    story.append(Spacer(1, 14 * mm))
+    story.append(Spacer(1, 6 * mm))
 
     status = report.get("status", "N/A")
     status_color = {
@@ -1669,7 +1858,7 @@ def generate_security_pdf(report, client_name="Client"):
         ("ROWBACKGROUNDS", (0, 1), (-1, 1), [colors.HexColor("#F5F7FA")]),
     ]))
     story.append(kpi_table)
-    story.append(Spacer(1, 10 * mm))
+    story.append(Spacer(1, 6 * mm))
     story.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#CFD8DC")))
     story.append(Spacer(1, 4))
     story.append(Paragraph(
@@ -1678,7 +1867,7 @@ def generate_security_pdf(report, client_name="Client"):
         "supplemented with manual penetration testing for a complete risk assessment.",
         small_style
     ))
-    story.append(PageBreak())
+    story.append(Spacer(1, 6 * mm))
 
     # =========================== EXECUTIVE SUMMARY ===========================
     story.append(Paragraph("1. Executive Summary", heading_style))
@@ -1880,6 +2069,20 @@ def generate_security_pdf(report, client_name="Client"):
             story.append(Spacer(1, 3))
     else:
         story.append(Paragraph("No outstanding recommendations - all checks passed.", normal_style))
+
+    story.append(PageBreak())
+
+    # =========================== AI SUGGESTIONS (OVERALL REVIEW) ===========================
+    story.append(Paragraph("9. AI Overall Review &amp; Suggestions", heading_style))
+
+    ai_text = _generate_security_ai_suggestions(report)
+
+    for para in ai_text.split("\n"):
+        para = para.strip()
+        if not para:
+            story.append(Spacer(1, 4))
+            continue
+        story.append(_p(para, normal_style))
 
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#CFD8DC")))

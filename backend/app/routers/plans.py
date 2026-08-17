@@ -1,4 +1,5 @@
 import os
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -21,6 +22,10 @@ from app.services.basic_validation_service import (
 from app.services.functional_testing_service import functional_testing
 from app.services.groq_service import generate_ai_suggestions
 from app.services.security_testing import security_audit
+from app.services.content_audit_service import content_audit
+from app.services.ux_audit_service import ux_audit
+from app.services.cro_audit_service import cro_audit
+from app.services.technical_audit_service import technical_audit
 from app.services.dashboard_service import update_dashboard_stats
 from app.services.website_db_service import save_website_test, save_functional_test_result
 from app.services.website_severity_service import calculate_website_severity
@@ -34,6 +39,15 @@ router = APIRouter(
     prefix="/plans",
     tags=["Plans"]
 )
+
+
+def _new_report_path(plan: str, user_id: int) -> str:
+    """A unique, persistent path for this one report. Previously every
+    tier reused a fixed filename (e.g. Basic_Website_Report.pdf) which
+    the next scan - by ANY user - would silently overwrite, so nothing
+    could ever be re-downloaded from history."""
+    os.makedirs("reports", exist_ok=True)
+    return os.path.join("reports", f"{plan}_{user_id}_{uuid.uuid4().hex}.pdf")
 
 
 @router.get("/features")
@@ -71,6 +85,11 @@ def basic_plan_report(
         "image_validation": image,
     }
 
+    pdf_path = generate_basic_pdf_report(
+        report_data,
+        filename=_new_report_path("basic", current_user.id)
+    )
+
     save_website_test(
         db=db,
         url=data.url,
@@ -81,12 +100,13 @@ def basic_plan_report(
         security={},
         broken={},
         ai={"content_validation": content, "image_validation": image},
-        severity=calculate_website_severity(website.get("health_score", 0))
+        severity=calculate_website_severity(website.get("health_score", 0)),
+        user_id=current_user.id,
+        plan="basic",
+        report_path=pdf_path,
     )
-    update_dashboard_stats(db, "website_tests")
-    update_dashboard_stats(db, "reports_generated")
-
-    pdf_path = generate_basic_pdf_report(report_data)
+    update_dashboard_stats(db, "website_tests", user_id=current_user.id)
+    update_dashboard_stats(db, "reports_generated", user_id=current_user.id)
 
     return FileResponse(
         pdf_path,
@@ -164,6 +184,11 @@ def standard_plan_report(
         "ai_suggestions": ai_suggestions,
     }
 
+    pdf_path = generate_standard_pdf_report(
+        report_data,
+        filename=_new_report_path("standard", current_user.id)
+    )
+
     save_website_test(
         db=db,
         url=data.url,
@@ -174,18 +199,19 @@ def standard_plan_report(
         security={},
         broken={},
         ai=ai_suggestions,
-        severity=calculate_website_severity(website.get("health_score", 0))
+        severity=calculate_website_severity(website.get("health_score", 0)),
+        user_id=current_user.id,
+        plan="standard",
+        report_path=pdf_path,
     )
     save_functional_test_result(
         db=db,
         url=data.url,
         functional=functional
     )
-    update_dashboard_stats(db, "website_tests")
-    update_dashboard_stats(db, "reports_generated")
-    update_dashboard_stats(db, "ai_suggestions")
-
-    pdf_path = generate_standard_pdf_report(report_data)
+    update_dashboard_stats(db, "website_tests", user_id=current_user.id)
+    update_dashboard_stats(db, "reports_generated", user_id=current_user.id)
+    update_dashboard_stats(db, "ai_suggestions", user_id=current_user.id)
 
     return FileResponse(
         pdf_path,
@@ -234,7 +260,9 @@ def standard_plan_test(
 # PREMIUM PLAN
 # Everything in Standard (functional testing, advanced SEO, advanced
 # accessibility, performance, AI recommendations) COMBINED with a full
-# security audit -> one combined JSON response and one combined PDF report.
+# website audit: Security, Content, UX, CRO and Technical (broken links,
+# redirects, caching/compression, Core Web Vitals) -> one combined JSON
+# response and one combined PDF report.
 # ============================================================
 
 def _run_standard_checks(url: str):
@@ -278,6 +306,19 @@ def _run_standard_checks(url: str):
     }
 
 
+def _run_premium_only_checks(url: str):
+    """Runs the extra audit categories that make Premium a full website
+    audit on top of Standard + Security: Content, UX, CRO and Technical
+    (broken links/redirects, caching/compression, Core Web Vitals)."""
+
+    return {
+        "content": content_audit(url),
+        "ux": ux_audit(url),
+        "cro": cro_audit(url),
+        "technical": technical_audit(url),
+    }
+
+
 @router.post("/premium/security-audit")
 def premium_plan_security_audit(
     data: WebsiteTestRequest,
@@ -285,17 +326,19 @@ def premium_plan_security_audit(
     current_user: User = Depends(require_plan("premium"))
 ):
     """
-    Premium = Standard plan features + full security audit, combined.
+    Premium = Standard plan features + a full website audit, combined.
 
     Returns the Standard-plan checks (functional testing, advanced SEO,
     advanced accessibility, performance, AI recommendations) together with
-    the full security audit JSON in the same response body. Includes the
-    path to the generated security audit PDF. Download it via
+    the full security audit, plus real Content, UX, CRO and Technical
+    audit results, in the same response body. Includes the path to the
+    generated security audit PDF. Download it via
     GET /plans/premium/security-audit/pdf?path=<security.pdf_report>.
     """
 
     standard = _run_standard_checks(data.url)
     security = security_audit(data.url, db, current_user.id)
+    extra = _run_premium_only_checks(data.url)
 
     website = standard["website"]
     functional = standard["functional"]
@@ -308,18 +351,21 @@ def premium_plan_security_audit(
         accessibility=standard["accessibility"],
         performance=standard["performance"],
         security=security,
-        broken={},
+        broken=extra["technical"].get("crawl", {}),
         ai=standard["ai_suggestions"],
-        severity=calculate_website_severity(website.get("health_score", 0))
+        severity=calculate_website_severity(website.get("health_score", 0)),
+        user_id=current_user.id,
+        plan="premium",
+        report_path=security.get("pdf_report"),
     )
     save_functional_test_result(
         db=db,
         url=data.url,
         functional=functional
     )
-    update_dashboard_stats(db, "website_tests")
-    update_dashboard_stats(db, "reports_generated")
-    update_dashboard_stats(db, "ai_suggestions")
+    update_dashboard_stats(db, "website_tests", user_id=current_user.id)
+    update_dashboard_stats(db, "reports_generated", user_id=current_user.id)
+    update_dashboard_stats(db, "ai_suggestions", user_id=current_user.id)
 
     return {
         "plan": "premium",
@@ -331,6 +377,10 @@ def premium_plan_security_audit(
         "functional": functional,
         "ai_suggestions": standard["ai_suggestions"],
         "security": security,
+        "content": extra["content"],
+        "ux": extra["ux"],
+        "cro": extra["cro"],
+        "technical": extra["technical"],
     }
 
 
@@ -342,12 +392,13 @@ def premium_plan_report(
 ):
     """
     Same combined checks as POST /plans/premium/security-audit (Standard
-    plan features + full security audit), returned as a single combined
-    PDF report instead of JSON.
+    plan features + full website audit: Security, Content, UX, CRO and
+    Technical), returned as a single combined PDF report instead of JSON.
     """
 
     standard = _run_standard_checks(data.url)
     security = security_audit(data.url, db, current_user.id)
+    extra = _run_premium_only_checks(data.url)
 
     website = standard["website"]
     functional = standard["functional"]
@@ -361,7 +412,16 @@ def premium_plan_report(
         "functional": functional,
         "ai_suggestions": standard["ai_suggestions"],
         "security": security,
+        "content": extra["content"],
+        "ux": extra["ux"],
+        "cro": extra["cro"],
+        "technical": extra["technical"],
     }
+
+    pdf_path = generate_premium_pdf_report(
+        report_data,
+        filename=_new_report_path("premium", current_user.id)
+    )
 
     save_website_test(
         db=db,
@@ -371,20 +431,21 @@ def premium_plan_report(
         accessibility=standard["accessibility"],
         performance=standard["performance"],
         security=security,
-        broken={},
+        broken=extra["technical"].get("crawl", {}),
         ai=standard["ai_suggestions"],
-        severity=calculate_website_severity(website.get("health_score", 0))
+        severity=calculate_website_severity(website.get("health_score", 0)),
+        user_id=current_user.id,
+        plan="premium",
+        report_path=pdf_path,
     )
     save_functional_test_result(
         db=db,
         url=data.url,
         functional=functional
     )
-    update_dashboard_stats(db, "website_tests")
-    update_dashboard_stats(db, "reports_generated")
-    update_dashboard_stats(db, "ai_suggestions")
-
-    pdf_path = generate_premium_pdf_report(report_data)
+    update_dashboard_stats(db, "website_tests", user_id=current_user.id)
+    update_dashboard_stats(db, "reports_generated", user_id=current_user.id)
+    update_dashboard_stats(db, "ai_suggestions", user_id=current_user.id)
 
     return FileResponse(
         pdf_path,
@@ -418,5 +479,5 @@ def download_premium_security_pdf(
     return FileResponse(
         requested_path,
         media_type="application/pdf",
-        filename="TestPilot_Security_Audit_Report.pdf"
+        filename="Crosbytech_Security_Audit_Report.pdf"
     )

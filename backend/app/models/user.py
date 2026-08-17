@@ -13,10 +13,22 @@ class User(Base):
 
     email = Column(String(150), unique=True, index=True)
 
-    password = Column(String(255), nullable=False)
+    # Nullable now: Google sign-in users have no local password.
+    password = Column(String(255), nullable=True)
+
+    # "local" for email/password signups, "google" for Google sign-in.
+    auth_provider = Column(String(20), nullable=False, default="local", server_default="local")
+
+    # Google's stable per-account id ("sub" claim). Unique when present.
+    google_id = Column(String(255), unique=True, index=True, nullable=True)
+
+    # Profile picture URL returned by Google, if any.
+    picture = Column(String(500), nullable=True)
 
     # Subscription tier that gates which testing features the user can run.
-    # One of: "basic", "standard", "premium". Defaults to "basic" for new signups.
-    plan = Column(String(20), nullable=False, default="basic", server_default="basic")
+    # One of: "basic", "standard", "premium". NULL/None until the user
+    # actually pays for a plan via PUT /users/plan - new signups and
+    # Google sign-ins are never auto-assigned a plan.
+    plan = Column(String(20), nullable=True, default=None)
 
     created_at = Column(DateTime, default=datetime.utcnow)

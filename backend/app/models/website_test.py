@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from app.database.database import Base
 
@@ -6,6 +6,14 @@ class WebsiteTest(Base):
     __tablename__ = "website_tests"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    # Who ran this test, and on which plan — nullable so the older
+    # unauthenticated /website/... endpoints still work without a user.
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+
+    plan = Column(String, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     url = Column(String, nullable=False)
 
@@ -32,6 +40,11 @@ class WebsiteTest(Base):
     ai_suggestions = Column(Text)
 
     severity = Column(String, default="Low")
+
+    # Path to the persisted PDF for this specific test run, so the
+    # exact report shown at scan-time can be re-downloaded later from
+    # history instead of being silently overwritten by the next scan.
+    report_path = Column(String, nullable=True)
 
 
 class FunctionalTestResult(Base):

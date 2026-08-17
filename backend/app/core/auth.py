@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.core.jwt_handler import SECRET_KEY, ALGORITHM
@@ -31,6 +31,14 @@ def get_current_user(
                 detail="Invalid Token"
             )
 
+    except ExpiredSignatureError:
+        # Tokens live for 60 minutes (see jwt_handler.ACCESS_TOKEN_EXPIRE_MINUTES).
+        # Surface this distinctly from a malformed/tampered token so the
+        # frontend can tell "please log in again" apart from a real bug.
+        raise HTTPException(
+            status_code=401,
+            detail="Session expired. Please log in again."
+        )
     except JWTError:
         raise HTTPException(
             status_code=401,

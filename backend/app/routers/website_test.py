@@ -28,7 +28,10 @@ from app.services.pdf_service import clean_issue_text, generate_pdf_report
 from app.services.website_db_service import (
     save_website_test,
     get_all_website_tests,
+    get_user_website_tests,
+    get_user_website_test_by_id,
 )
+import os
 from app.core.auth import get_current_user
 from app.services.advanced_seo_service import advanced_seo_check
 from app.services.ai_analysis_service import generate_website_ai_review
@@ -152,9 +155,50 @@ def website_test(
 
 @router.get("/history")
 def website_history(
-    db: Session = Depends(get_db)
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    return get_all_website_tests(db)
+    """This user's own scan history, most recent first.
+
+    Previously this called get_all_website_tests(db) with no auth
+    required, so every user's history (every site anyone had ever
+    scanned) showed up for everyone. Now it's locked to the logged-in
+    user, same as /dashboard/history.
+    """
+    return get_user_website_tests(db, current_user.id, limit=limit)
+
+
+@router.get("/history/{test_id}/download")
+def download_history_report(
+    test_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Re-download the PDF that was generated for one specific past
+    scan, without re-running the scan. Only works for a test that
+    belongs to the logged-in user, and only for scans made after this
+    feature shipped (older rows won't have a saved report_path)."""
+
+    test = get_user_website_test_by_id(db, test_id, current_user.id)
+
+    if test is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No history entry found for this user with that id."
+        )
+
+    if not test.report_path or not os.path.isfile(test.report_path):
+        raise HTTPException(
+            status_code=404,
+            detail="No saved report for this scan. Run the test again to get a downloadable report."
+        )
+
+    return FileResponse(
+        test.report_path,
+        media_type="application/pdf",
+        filename=f"TestPilot_{(test.plan or 'website').capitalize()}_Report_{test.id}.pdf"
+    )
 
 
 @router.post("/check-links")

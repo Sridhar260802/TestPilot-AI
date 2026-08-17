@@ -3,6 +3,30 @@ from app.models.website_test import WebsiteTest, FunctionalTestResult
 import json
 
 
+def _safe_broken_links_count(broken):
+    """
+    broken_links must always be an int for the DB column.
+    Upstream (check_broken_links / other callers) can hand us:
+      - a dict like {"broken_links": 3, ...}
+      - a plain int
+      - a list of broken link URLs (legacy/alternate shape)
+    Normalize all of these to an int count so SQLAlchemy never
+    chokes with 'Error binding parameter: type list is not supported'.
+    """
+    if isinstance(broken, dict):
+        value = broken.get("broken_links", 0)
+    else:
+        value = broken
+
+    if isinstance(value, list):
+        return len(value)
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def save_website_test(
     db: Session,
     url: str,
@@ -13,10 +37,19 @@ def save_website_test(
     security: dict,
     broken: dict,
     ai: dict,
-    severity: str
+    severity: str,
+    user_id: int = None,
+    plan: str = None,
+    report_path: str = None,
 ):
 
     obj = WebsiteTest(
+
+        user_id=user_id,
+
+        plan=plan,
+
+        report_path=report_path,
 
         url=url,
 
@@ -38,7 +71,7 @@ def save_website_test(
 
         security_score=security.get("security_score", 0),
 
-        broken_links=broken.get("broken_links", 0),
+        broken_links=_safe_broken_links_count(broken),
 
         ai_suggestions=json.dumps(ai),
 
@@ -65,6 +98,31 @@ def get_all_website_tests(db: Session):
 
         .all()
 
+    )
+
+
+def get_user_website_tests(db: Session, user_id: int, limit: int = 20):
+    """All websites this user has tested, most recent first — powers the
+    'recent audits' history on the dashboard."""
+
+    return (
+        db.query(WebsiteTest)
+        .filter(WebsiteTest.user_id == user_id)
+        .order_by(WebsiteTest.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_user_website_test_by_id(db: Session, test_id: int, user_id: int):
+    """A single history row, but ONLY if it belongs to this user — used
+    by the report-download endpoint so one user can't pull another
+    user's report by guessing/incrementing the id."""
+
+    return (
+        db.query(WebsiteTest)
+        .filter(WebsiteTest.id == test_id, WebsiteTest.user_id == user_id)
+        .first()
     )
 
 
