@@ -19,6 +19,48 @@ from reportlab.platypus import (
 from reportlab.lib.units import mm
 from pathlib import Path
 
+import requests
+
+# =====================================
+# Global Timeout Settings
+# =====================================
+
+DEFAULT_NAV_TIMEOUT = 60000
+DEFAULT_ACTION_TIMEOUT = 15000
+NETWORK_IDLE_TIMEOUT = 8000
+REQUEST_TIMEOUT = 10000
+
+
+def safe_network_idle(page, timeout=NETWORK_IDLE_TIMEOUT):
+    """
+    FIX: wait_for_load_state("networkidle") used to have Playwright's
+    default 30000ms timeout with NO guard. Real sites rarely go fully
+    idle (analytics/chat widgets/websockets keep polling), so it kept
+    randomly timing out and failing whole modules that were actually
+    fine. This wrapper waits a short, sane amount of time and simply
+    continues instead of blowing up the module if idle is never reached.
+    """
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout)
+    except TimeoutError:
+        print("⚠️ Network did not go fully idle in time - continuing anyway.")
+    except Exception as e:
+        print(f"⚠️ wait_for_load_state ignored error: {e}")
+
+
+def safe_goto(page, url, timeout=DEFAULT_NAV_TIMEOUT):
+    """Defensive page.goto with one retry on timeout."""
+    try:
+        return page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    except TimeoutError:
+        print(f"⚠️ Navigation timeout for {url}, retrying once...")
+        try:
+            return page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+        except Exception as e:
+            print(f"❌ Navigation failed again: {e}")
+            return None
+
+
 
 
 # =====================================
@@ -97,7 +139,7 @@ def website_open_test(page, url):
         # React / NextJS Hydration
         page.wait_for_timeout(5000)
 
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         load_time = round(
             time.time() - start_time,
@@ -248,7 +290,7 @@ def navigation_links_test(page, url):
         # Wait for React rendering
         page.wait_for_timeout(3000)
 
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         # Find all links
         links = page.locator("a[href]")
@@ -411,7 +453,7 @@ def navbar_test(page):
 
         # Wait for React rendering
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         # Multiple navbar selectors
         navbar = page.locator(
@@ -618,7 +660,7 @@ def footer_test(page, url):
         print("\n========== FOOTER TEST START ==========")
 
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         print("Searching Footer...")
 
@@ -1016,6 +1058,7 @@ def buttons_test(page):
         ):
 
             text = data["text"]
+            before_url = page.url  # FIX: default so cleanup code below never hits an unbound variable
 
             print("\n--------------------------------")
             print(
@@ -1597,7 +1640,7 @@ def form_validation_test(page):
         print("\n========== FORM VALIDATION START ==========")
 
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         # -----------------------------
         # Detect Forms
@@ -2089,7 +2132,7 @@ def broken_images_test(page):
         print("\n========== BROKEN IMAGES TEST START ==========")
 
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         images = page.locator("img")
 
@@ -2214,7 +2257,7 @@ def image_test(page, url):
         print("======================================")
 
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         # Collect all images
 
@@ -2647,7 +2690,7 @@ def content_validation_test(page):
 
         page.goto(page.url)
 
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         selectors = [
             "h1",
@@ -2914,7 +2957,7 @@ def content_quality_test(page):
         })
 
         page.reload()
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         print("--------------------------------------")
         print("Checking Desktop Layout...")
@@ -2976,7 +3019,7 @@ def content_quality_test(page):
         })
 
         page.reload()
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         print("--------------------------------------")
         print("Checking Tablet Layout...")
@@ -3038,7 +3081,7 @@ def content_quality_test(page):
         })
 
         page.reload()
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         print("--------------------------------------")
         print("Checking Mobile Layout...")
@@ -3838,7 +3881,9 @@ def authentication_test(page):
             "signin",
             "sign in",
             "authenticate",
-            "continue"
+            "continue",
+            "my account",
+            "account"
         ]
 
         for i in range(button_count):
@@ -3851,21 +3896,73 @@ def authentication_test(page):
                     timeout=3000
                 ).strip()
 
+                aria_label = (
+                    button.get_attribute("aria-label")
+                    or ""
+                ).lower()
+
+                title_attr = (
+                    button.get_attribute("title")
+                    or ""
+                ).lower()
+
+                href_attr = (
+                    button.get_attribute("href")
+                    or ""
+                ).lower()
+
+                class_attr = (
+                    button.get_attribute("class")
+                    or ""
+                ).lower()
+
                 text_lower = text.lower()
 
-                if any(
-                    keyword in text_lower
+                combined = (
+                    f"{text_lower} "
+                    f"{aria_label} "
+                    f"{title_attr} "
+                    f"{class_attr}"
+                )
+
+                matched = any(
+                    keyword in combined
                     for keyword in auth_keywords
-                ):
+                )
+
+                if not matched and href_attr:
+
+                    if (
+                        "/login" in href_attr
+                        or
+                        "/signin" in href_attr
+                        or
+                        "/sign-in" in href_attr
+                        or
+                        "/account" in href_attr
+                        or
+                        "/my-account" in href_attr
+                    ):
+
+                        matched = True
+
+                if matched:
+
+                    label = (
+                        text
+                        or aria_label
+                        or title_attr
+                        or f"Auth Button {i + 1}"
+                    )
 
                     auth_buttons.append({
                         "index": i,
-                        "text": text or f"Auth Button {i + 1}"
+                        "text": label
                     })
 
                     print(
                         f"Authentication button detected : "
-                        f"{text or 'Unnamed Button'}"
+                        f"{label}"
                     )
 
             except Exception as e:
@@ -4449,7 +4546,7 @@ def search_functionality_test(page):
         print("======================================")
 
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         # -------------------------------
         # Detect Search Box
@@ -4636,7 +4733,7 @@ def accessibility_check(page):
         print("======================================")
 
         page.wait_for_timeout(3000)
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         screenshot = save_screenshot(
             page,
@@ -6026,7 +6123,7 @@ def responsive_test(page):
         })
 
         page.reload()
-        page.wait_for_load_state("networkidle")
+        safe_network_idle(page)
 
         screenshot = f"screenshots/{device['name'].lower()}_responsive.png"
 
@@ -6469,24 +6566,24 @@ def console_error_detection(page):
 
     page.on("console", handle_console)
 
-    page.reload(
-        wait_until="domcontentloaded",
-        timeout=60000
-    )
-
-    page.wait_for_timeout(3000)
-
     screenshot = "screenshots/console_error_test.png"
 
-    current_page = locals().get("page")
+    try:
+        page.reload(
+            wait_until="domcontentloaded",
+            timeout=DEFAULT_NAV_TIMEOUT
+        )
+        page.wait_for_timeout(3000)
+    except Exception as e:
+        print(f"⚠️ Console error module reload issue (continuing): {e}")
 
-    if current_page is None:
-        raise RuntimeError("API validation page is not available")
-
-    current_page.screenshot(
-        path=screenshot,
-        full_page=True
-    )
+    try:
+        page.screenshot(
+            path=screenshot,
+            full_page=True
+        )
+    except Exception as e:
+        print(f"⚠️ Screenshot failed: {e}")
 
     if len(console_errors) == 0:
 
@@ -6835,7 +6932,23 @@ def download_upload_test(page):
                     else ""
                 )
 
+                aria_label = (
+                    link.get_attribute("aria-label")
+                    or ""
+                ).lower()
+
+                title_attr = (
+                    link.get_attribute("title")
+                    or ""
+                ).lower()
+
                 text_lower = text.lower()
+
+                combined_text = (
+                    f"{text_lower} "
+                    f"{aria_label} "
+                    f"{title_attr}"
+                )
 
                 is_download = False
 
@@ -6849,12 +6962,14 @@ def download_upload_test(page):
                     is_download = True
 
                 if any(
-                    keyword in text_lower
+                    keyword in combined_text
                     for keyword in download_keywords
                 ):
                     is_download = True
 
                 if is_download:
+
+                    text = text or aria_label or title_attr
 
                     download_elements.append({
                         "type": "link",
@@ -6909,6 +7024,11 @@ def download_upload_test(page):
             f"Total visible buttons found : {total_buttons}"
         )
 
+        download_button_keywords = [
+            "download",
+            "export"
+        ]
+
         for i in range(total_buttons):
 
             try:
@@ -6919,26 +7039,52 @@ def download_upload_test(page):
                     timeout=3000
                 ).strip()
 
+                aria_label = (
+                    button.get_attribute("aria-label")
+                    or ""
+                ).lower()
+
+                title_attr = (
+                    button.get_attribute("title")
+                    or ""
+                ).lower()
+
+                class_attr = (
+                    button.get_attribute("class")
+                    or ""
+                ).lower()
+
                 text_lower = text.lower()
 
+                combined = (
+                    f"{text_lower} "
+                    f"{aria_label} "
+                    f"{title_attr} "
+                    f"{class_attr}"
+                )
+
                 if any(
-                    keyword in text_lower
-                    for keyword in [
-                        "download",
-                        "export"
-                    ]
+                    keyword in combined
+                    for keyword in download_button_keywords
                 ):
+
+                    label = (
+                        text
+                        or aria_label
+                        or title_attr
+                        or f"Download Button {i + 1}"
+                    )
 
                     download_elements.append({
                         "type": "button",
                         "index": i,
-                        "text": text or f"Download Button {i + 1}",
+                        "text": label,
                         "href": None
                     })
 
                     print(
                         f"Download button found : "
-                        f"{text or 'Unnamed Button'}"
+                        f"{label}"
                     )
 
             except Exception as e:
@@ -7148,6 +7294,14 @@ def download_upload_test(page):
             f"{total_upload_buttons}"
         )
 
+        upload_button_keywords = [
+            "upload",
+            "import",
+            "attach",
+            "choose file",
+            "select file"
+        ]
+
         for i in range(total_upload_buttons):
 
             try:
@@ -7158,28 +7312,51 @@ def download_upload_test(page):
                     timeout=3000
                 ).strip()
 
+                aria_label = (
+                    button.get_attribute("aria-label")
+                    or ""
+                ).lower()
+
+                title_attr = (
+                    button.get_attribute("title")
+                    or ""
+                ).lower()
+
+                class_attr = (
+                    button.get_attribute("class")
+                    or ""
+                ).lower()
+
                 text_lower = text.lower()
 
+                combined = (
+                    f"{text_lower} "
+                    f"{aria_label} "
+                    f"{title_attr} "
+                    f"{class_attr}"
+                )
+
                 if any(
-                    keyword in text_lower
-                    for keyword in [
-                        "upload",
-                        "import",
-                        "attach",
-                        "choose file",
-                        "select file"
-                    ]
+                    keyword in combined
+                    for keyword in upload_button_keywords
                 ):
+
+                    label = (
+                        text
+                        or aria_label
+                        or title_attr
+                        or f"Upload Button {i + 1}"
+                    )
 
                     upload_elements.append({
                         "type": "upload_button",
                         "index": i,
-                        "text": text or f"Upload Button {i + 1}"
+                        "text": label
                     })
 
                     print(
                         f"Upload button found : "
-                        f"{text or 'Unnamed Button'}"
+                        f"{label}"
                     )
 
             except Exception as e:
@@ -9536,244 +9713,449 @@ def functional_testing(url):
     print("STARTING FUNCTIONAL TEST")
     print("===========================================\n")
 
+    browser = None
+
     try:
 
         with sync_playwright() as p:
 
-            browser = p.chromium.launch(
-                headless=True
-            )
-
+            browser = p.chromium.launch(headless=True)
             page = browser.new_page()
+            # FIX: sane page-level defaults so individual actions
+            # (clicks, fills, waits) don't hang for the full 30s+
+            page.set_default_timeout(DEFAULT_NAV_TIMEOUT)
+            page.set_default_navigation_timeout(DEFAULT_NAV_TIMEOUT)
 
             # ====================================================
-            # MODULE 1
+            # MODULE 1 : WEBSITE OPEN
             # ====================================================
 
             print("\nRunning Module 1 : Website Open")
 
-            results.append(
-                website_open_test(page, url)
-            )
+            try:
+
+                results.append(
+                    website_open_test(page, url)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 1 : Website Open Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Website Opens",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 2
+            # MODULE 2 : NAVIGATION LINKS
             # ====================================================
 
             print("\nRunning Module 2 : Navigation Links")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(2000)
+                safe_goto(page, url)
+                page.wait_for_timeout(2000)
 
-            results.append(
-                navigation_links_test(page, url)
-            )
+                results.append(
+                    navigation_links_test(page, url)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 2 : Navigation Links Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Navigation Links",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 3
+            # MODULE 3 : NAVBAR
             # ====================================================
 
             print("\nRunning Module 3 : Navbar")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(1500)
+                safe_goto(page, url)
+                page.wait_for_timeout(1500)
 
-            results.append(
-                navbar_test(page)
-            )
+                results.append(
+                    navbar_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 3 : Navbar Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Navbar",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 4
+            # MODULE 4 : FOOTER
             # ====================================================
 
             print("\nRunning Module 4 : Footer")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(1500)
+                safe_goto(page, url)
+                page.wait_for_timeout(1500)
 
-            results.append(
-                footer_test(page, url)
-            )
+                results.append(
+                    footer_test(page, url)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 4 : Footer Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Footer",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 5
+            # MODULE 5 : BUTTONS
             # ====================================================
 
             print("\nRunning Module 5 : Buttons")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(1500)
+                safe_goto(page, url)
+                page.wait_for_timeout(1500)
 
-            results.append(
-                buttons_test(page)
-            )
+                results.append(
+                    buttons_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 5 : Buttons Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Buttons",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 6
+            # MODULE 6 : FORMS VALIDATION
             # ====================================================
 
             print("\nRunning Module 6 : Forms Validation")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(1500)
+                safe_goto(page, url)
+                page.wait_for_timeout(1500)
 
-            results.append(
-                form_validation_test(page)
-            )
+                results.append(
+                    form_validation_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 6 : Forms Validation Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Form Validation",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 7
+            # MODULE 7 : IMAGES
             # ====================================================
 
             print("\nRunning Module 7 : Images")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(1500)
+                safe_goto(page, url)
+                page.wait_for_timeout(1500)
 
-            results.append(
-                image_test(page, url)
-            )
+                results.append(
+                    image_test(page, url)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 7 : Images Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Images",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 8
+            # MODULE 8 : CONTENT VALIDATION
             # ====================================================
 
             print("\nRunning Module 8 : Content Validation")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(1500)
+                safe_goto(page, url)
+                page.wait_for_timeout(1500)
 
-            results.append(
-                content_validation_test(page)
-            )
+                results.append(
+                    content_validation_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 8 : Content Validation Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Content Validation",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 9
+            # MODULE 9 : CONTENT QUALITY
             # ====================================================
 
             print("\nRunning Module 9 : Content Quality")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(3000)
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
 
-            results.append(
-                content_quality_test(page)
-            )
+                results.append(
+                    content_quality_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 9 : Content Quality Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Content Quality",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 10
+            # MODULE 10 : AUTHENTICATION TESTING
             # ====================================================
 
             print("\nRunning Module 10 : Authentication Testing")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(3000)
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
 
-            results.append(
-                authentication_test(page)
-            )
+                results.append(
+                    authentication_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 10 : Authentication Testing Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Authentication Testing",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 11
+            # MODULE 11 : SESSION & COOKIES
             # ====================================================
 
             print("\nRunning Module 11 : Session & Cookies")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(3000)
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
 
-            results.append(
-                session_cookie_test(page)
-            )
+                results.append(
+                    session_cookie_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 11 : Session & Cookies Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Session & Cookies",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 12
+            # MODULE 12 : (Intentionally skipped - see search_functionality_test)
             # ====================================================
 
-            
-
             # ====================================================
-            # MODULE 13
+            # MODULE 13 : ACCESSIBILITY (WCAG)
             # ====================================================
 
             print("\nRunning Module 13 : Accessibility (WCAG)")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(3000)
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
 
-            results.append(
-                accessibility_check(page)
-            )
+                results.append(
+                    accessibility_check(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 13 : Accessibility (WCAG) Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Accessibility (WCAG)",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 14
+            # MODULE 14 : SEO TESTING
             # ====================================================
 
             print("\nRunning Module 14 : SEO Testing")
 
             try:
 
-                page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=60000
-                )
-
+                safe_goto(page, url)
                 page.wait_for_timeout(5000)
 
                 results.append(
@@ -9802,159 +10184,265 @@ def functional_testing(url):
                 })
 
             # ====================================================
-            # MODULE 15
+            # MODULE 15 : RESPONSIVE DESIGN
             # ====================================================
 
             print("\nRunning Module 15 : Responsive Design")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(4000)
+                safe_goto(page, url)
+                page.wait_for_timeout(4000)
 
-            results.append(
-                responsive_test(page)
-            )
+                results.append(
+                    responsive_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 15 : Responsive Design Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Responsive Design",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
 
             # ====================================================
-            # MODULE 16
+            # MODULE 16 : SECURITY HEADERS
             # ====================================================
 
             print("\nRunning Module 16 : Security Headers")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            try:
 
-            page.wait_for_timeout(4000)
+                safe_goto(page, url)
+                page.wait_for_timeout(4000)
 
-            results.append(
-                security_headers_test(
-                    page,
-                    url
+                results.append(
+                    security_headers_test(page, url)
                 )
-            )
 
-            # ====================================================
-            # MODULE 17
-            # ====================================================
+            except Exception as e:
 
-            print(
-                "\nRunning Module 17 : "
-                "Console Error Detection"
-            )
+                print("❌ Module 16 : Security Headers Error")
+                print(f"Error : {e}")
 
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-            page.wait_for_timeout(3000)
-
-            results.append(
-                console_error_detection(page)
-            )
-
-            # ====================================================
-            # MODULE 18
-            # ====================================================
-
-            print(
-                "\nRunning Module 18 : "
-                "Broken Resources"
-            )
-
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-            page.wait_for_timeout(3000)
-
-            results.append(
-                broken_resources_test(page)
-            )
-
-            # ====================================================
-            # MODULE 19
-            # ====================================================
-
-            print(
-                "\nRunning Module 19 : "
-                "Download / Upload Testing"
-            )
-
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-            page.wait_for_timeout(3000)
-
-            results.append(
-                download_upload_test(page)
-            )
-
-            # ====================================================
-            # MODULE 20
-            # ====================================================
-
-            print(
-                "\nRunning Module 20 : "
-                "API Validation"
-            )
-
-            # API listener should be created inside
-            # api_validation_test before its page reload.
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
-
-            page.wait_for_timeout(3000)
-
-            results.append(
-                api_validation_test(page)
-            )
-
-            # ====================================================
-            # MODULE 21
-            # ====================================================
-
-            print(
-                "\nRunning Module 21 : "
-                "Browser Compatibility"
-            )
-
-            results.append(
-                browser_compatibility_test(
-                    p,
-                    url
+                results.append(
+                    {
+                    "module": "Security Headers",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
                 )
-            )
+
             # ====================================================
-            # MODULE 22
+            # MODULE 17 : CONSOLE ERROR DETECTION
+            # ====================================================
+
+            print("\nRunning Module 17 : Console Error Detection")
+
+            try:
+
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
+
+                results.append(
+                    console_error_detection(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 17 : Console Error Detection Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Console Error Detection",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
+
+            # ====================================================
+            # MODULE 18 : BROKEN RESOURCES
+            # ====================================================
+
+            print("\nRunning Module 18 : Broken Resources")
+
+            try:
+
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
+
+                results.append(
+                    broken_resources_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 18 : Broken Resources Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Broken Resources",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
+
+            # ====================================================
+            # MODULE 19 : DOWNLOAD / UPLOAD TESTING
+            # ====================================================
+
+            print("\nRunning Module 19 : Download / Upload Testing")
+
+            try:
+
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
+
+                results.append(
+                    download_upload_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 19 : Download / Upload Testing Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "Download / Upload Testing",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
+
+            # ====================================================
+            # MODULE 20 : API VALIDATION
+            # ====================================================
+
+            print("\nRunning Module 20 : API Validation")
+
+            try:
+
+                safe_goto(page, url)
+                page.wait_for_timeout(3000)
+
+                results.append(
+                    api_validation_test(page)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 20 : API Validation Error")
+                print(f"Error : {e}")
+
+                results.append(
+                    {
+                    "module": "API Validation",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "This module crashed unexpectedly during execution.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                }
+                )
+
+            # ====================================================
+            # MODULE 21 : BROWSER COMPATIBILITY
+            # ====================================================
+
+            print("\nRunning Module 21 : Browser Compatibility")
+
+            try:
+
+                results.append(
+                    browser_compatibility_test(p, url)
+                )
+
+            except Exception as e:
+
+                print("❌ Module 21 Browser Compatibility Error")
+                print(f"Error : {e}")
+
+                results.append({
+                    "module": "Browser Compatibility",
+                    "status": "FAIL",
+                    "issue": str(e),
+                    "issues": [str(e)],
+                    "possible_reason": "Browser compatibility module crashed unexpectedly.",
+                    "recommendation": "Review module logs and retry.",
+                    "recommendations": ["Review module logs and retry."],
+                    "developer_action": "Check Playwright execution logs for this module.",
+                    "screenshot": "",
+                    "screenshots": []
+                })
+
+            # ====================================================
+            # MODULE 22 : FINAL REPORT GENERATION
             # ====================================================
 
             print("\nRunning Module 22 : Final Report Generation")
 
-            final_report = final_report_generation_test(
-                results
-            )
+            try:
+                final_report = final_report_generation_test(results)
+            except Exception as e:
+                print(f"❌ Module 22 Final Report Error : {e}")
+                final_report = None
+
             # ====================================================
             # CLOSE BROWSER
             # ====================================================
 
-            browser.close()
+            try:
+                browser.close()
+            except Exception:
+                pass
 
         # ========================================================
         # FINAL SUMMARY
@@ -9962,46 +10450,17 @@ def functional_testing(url):
 
         executed_modules = len(results)
 
-        passed = sum(
-            1
-            for result in results
-            if result.get("status") == "PASS"
-        )
-
-        failed = sum(
-            1
-            for result in results
-            if result.get("status") == "FAIL"
-        )
-
-        not_available = sum(
-            1
-            for result in results
-            if result.get("status") == "NOT_AVAILABLE"
-        )
-
-        skipped = sum(
-            1
-            for result in results
-            if result.get("status") == "SKIPPED"
-        )
-
-        partial = sum(
-            1
-            for result in results
-            if result.get("status") == "PARTIAL"
-        )
+        passed = sum(1 for result in results if result.get("status") == "PASS")
+        failed = sum(1 for result in results if result.get("status") == "FAIL")
+        not_available = sum(1 for result in results if result.get("status") == "NOT_AVAILABLE")
+        skipped = sum(1 for result in results if result.get("status") == "SKIPPED")
+        partial = sum(1 for result in results if result.get("status") == "PARTIAL")
 
         tested_modules = passed + failed
 
         if tested_modules > 0:
-
-            score = int(
-                (passed / tested_modules) * 100
-            )
-
+            score = int((passed / tested_modules) * 100)
         else:
-
             score = 0
 
         # ========================================================
@@ -10011,66 +10470,23 @@ def functional_testing(url):
         print("\n===========================================")
         print("FUNCTIONAL TEST COMPLETED")
         print("===========================================")
-
-        print(
-            f"Total Modules     : {TOTAL_MODULES}"
-        )
-
-        print(
-            f"Executed Modules  : {executed_modules}"
-        )
-
-        print(
-            f"Passed            : {passed}"
-        )
-
-        print(
-            f"Failed            : {failed}"
-        )
-
-        print(
-            f"Not Available     : {not_available}"
-        )
-
-        print(
-            f"Skipped           : {skipped}"
-        )
-
-        print(
-            f"Partial           : {partial}"
-        )
-
-        print(
-            f"Tested Modules    : {tested_modules}"
-        )
-
-        print(
-            f"Score             : {score}%"
-        )
-
+        print(f"Total Modules     : {TOTAL_MODULES}")
+        print(f"Executed Modules  : {executed_modules}")
+        print(f"Passed            : {passed}")
+        print(f"Failed            : {failed}")
+        print(f"Not Available     : {not_available}")
+        print(f"Skipped           : {skipped}")
+        print(f"Partial           : {partial}")
+        print(f"Tested Modules    : {tested_modules}")
+        print(f"Score             : {score}%")
         print("-------------------------------------------")
 
         if executed_modules == TOTAL_MODULES:
-
-            print(
-                f"✅ All {TOTAL_MODULES} modules executed."
-            )
-
+            print(f"✅ All {TOTAL_MODULES} modules executed.")
         else:
-
-            remaining = (
-                TOTAL_MODULES -
-                executed_modules
-            )
-
-            print(
-                f"⚠️ {executed_modules} of "
-                f"{TOTAL_MODULES} modules executed."
-            )
-
-            print(
-                f"⏳ {remaining} module(s) pending."
-            )
+            remaining = TOTAL_MODULES - executed_modules
+            print(f"⚠️ {executed_modules} of {TOTAL_MODULES} modules executed.")
+            print(f"⏳ {remaining} module(s) pending.")
 
         print("===========================================\n")
 
@@ -10079,106 +10495,61 @@ def functional_testing(url):
         # ========================================================
 
         return {
-
             "functional_score": score,
-
             "passed": passed,
-
             "failed": failed,
-
             "not_available": not_available,
-
             "skipped": skipped,
-
             "partial": partial,
-
             "tested_modules": tested_modules,
-
             "executed_modules": executed_modules,
-
             "total_modules": TOTAL_MODULES,
-
             "results": results
         }
 
     except Exception as e:
 
+        # NOTE: with every module now wrapped in its own try/except above,
+        # this outer except should only trigger for truly catastrophic
+        # failures (e.g. browser could not launch at all, or Playwright
+        # itself crashed) - not for a single slow page or timeout anymore.
+
         print("\n❌ Critical Functional Testing Error")
         print(f"Error : {e}")
 
-        # If execution stopped midway,
-        # return the modules that actually completed.
+        try:
+            if browser is not None:
+                browser.close()
+        except Exception:
+            pass
 
         executed_modules = len(results)
 
-        passed = sum(
-            1
-            for result in results
-            if result.get("status") == "PASS"
-        )
-
-        failed = sum(
-            1
-            for result in results
-            if result.get("status") == "FAIL"
-        )
-
-        not_available = sum(
-            1
-            for result in results
-            if result.get("status") == "NOT_AVAILABLE"
-        )
-
-        skipped = sum(
-            1
-            for result in results
-            if result.get("status") == "SKIPPED"
-        )
-
-        partial = sum(
-            1
-            for result in results
-            if result.get("status") == "PARTIAL"
-        )
+        passed = sum(1 for result in results if result.get("status") == "PASS")
+        failed = sum(1 for result in results if result.get("status") == "FAIL")
+        not_available = sum(1 for result in results if result.get("status") == "NOT_AVAILABLE")
+        skipped = sum(1 for result in results if result.get("status") == "SKIPPED")
+        partial = sum(1 for result in results if result.get("status") == "PARTIAL")
 
         tested_modules = passed + failed
 
         if tested_modules > 0:
-
-            score = int(
-                (passed / tested_modules) * 100
-            )
-
+            score = int((passed / tested_modules) * 100)
         else:
-
             score = 0
 
         return {
-
             "functional_score": score,
-
             "passed": passed,
-
             "failed": failed,
-
             "not_available": not_available,
-
             "skipped": skipped,
-
             "partial": partial,
-
             "tested_modules": tested_modules,
-
             "executed_modules": executed_modules,
-
             "total_modules": TOTAL_MODULES,
-
             "results": results,
-
-            "issues": [
-                str(e)
-            ],
-
+            "issues": [str(e)],
             "recommendations": [
                 "Verify the failed module.",
                 "Review Playwright execution logs."
