@@ -411,8 +411,7 @@ export default function Dashboard() {
 
           <div className="mt-6 grid grid-cols-1 divide-y divide-[#14181B]/10 rounded-md border border-[#14181B]/12 bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <DirectoryCell label="Email" value="support@crosbytech.com" href="mailto:support@crosbytech.com" delay={0.1} />
-            <DirectoryCell label="Phone" value="+91 90000 00000" href="tel:+919000000000" delay={0.16} />
-            <DirectoryCell label="Office" value="Chennai, Tamil Nadu, India" delay={0.22} />
+            
           </div>
         </Reveal>
 
@@ -902,9 +901,7 @@ function Footer() {
               Contact
             </p>
             <ul className="mt-3 space-y-2 text-xs text-white/60">
-              <li><a href="mailto:support@crosbytech.com" className="transition-colors duration-200 hover:text-white">support@crosbytech.com</a></li>
-              <li><a href="tel:+919000000000" className="transition-colors duration-200 hover:text-white">+91 90000 00000</a></li>
-              <li className="text-white/60">Chennai, Tamil Nadu, India</li>
+              <li><a href="mailto:support@crosbytech.com" className="transition-colors duration-200 hover:text-white">support@crosbytech.com</a></li>             
             </ul>
           </div>
         </div>

@@ -37,6 +37,14 @@ const PLAN_COPY = {
   },
 };
 
+// Real generation time per tier — this drives the progress curve, not a fake timer.
+// Basic ~3 min, Standard ~4 min, Premium ~5 min.
+const PLAN_ESTIMATE_SECONDS = {
+  basic: 180,
+  standard: 240,
+  premium: 300,
+};
+
 export default function WebsiteTest() {
   useReportFonts();
 
@@ -107,13 +115,26 @@ export default function WebsiteTest() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F1ECDF] text-[#14181B]">
-      <Navbar />
+    <div className="relative min-h-screen overflow-hidden bg-[#F1ECDF] text-[#14181B]">
+      {/* premium ambient background — slow gradient blobs + faint scattered icons,
+          fills the dead space around the form instead of flat paper color */}
+      <div aria-hidden="true" className="pointer-events-none fixed inset-0 -z-0 overflow-hidden">
+        <div className="absolute -left-24 top-24 h-96 w-96 rounded-full bg-[#E4572E]/[0.07] blur-[90px] animate-[bgDriftA_14s_ease-in-out_infinite]" />
+        <div className="absolute -right-32 top-1/2 h-[28rem] w-[28rem] rounded-full bg-[#1F5C45]/[0.06] blur-[100px] animate-[bgDriftB_17s_ease-in-out_infinite]" />
+        <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-[#14181B]/[0.04] blur-[80px] animate-[bgDriftA_20s_ease-in-out_infinite]" />
+        <FloatingIcons />
+      </div>
+
+      <div className="relative z-10">
+        <Navbar />
+      </div>
 
       {!plan ? (
-        <NoPlanState />
+        <div className="relative z-10">
+          <NoPlanState />
+        </div>
       ) : (
-        <div className="mx-auto max-w-xl px-4 py-14 sm:px-6">
+        <div className="relative z-10 mx-auto max-w-xl px-4 py-14 sm:px-6">
           {/* Plan badge */}
           <div className="flex items-center gap-2 animate-[fadeSlideUp_0.5s_cubic-bezier(0.22,1,0.36,1)_both]">
             <span
@@ -186,7 +207,7 @@ export default function WebsiteTest() {
               </button>
             </div>
             <p className="mt-2 text-xs text-[#14181B]/40">
-              Takes about a minute. We'll check the page live — no crawling your whole site.
+              Full audits run for real — plan for a few minutes. We check the page live, no crawling your whole site.
             </p>
           </form>
 
@@ -365,6 +386,14 @@ export default function WebsiteTest() {
               70% { transform: translateX(-3px); }
               100% { transform: translateX(0); }
             }
+            @keyframes bgDriftA {
+              0%, 100% { transform: translate(0, 0) scale(1); }
+              50% { transform: translate(30px, -20px) scale(1.12); }
+            }
+            @keyframes bgDriftB {
+              0%, 100% { transform: translate(0, 0) scale(1); }
+              50% { transform: translate(-24px, 24px) scale(1.08); }
+            }
             @media (prefers-reduced-motion: reduce) {
               *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -375,6 +404,150 @@ export default function WebsiteTest() {
           `}</style>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- Ambient decoration ---------- */
+/* A handful of very faint line icons scattered across the page so the paper
+   background doesn't read as empty — echoes the report/chart/shield concepts
+   from the plan tiers without competing with the actual content. */
+function FloatingIcons() {
+  const icons = [
+    { top: "14%", left: "8%", delay: "0s", dur: "9s", size: 26, path: "M4 19h16M8 19V9m4 10V5m4 14v-7" }, // bars
+    { top: "70%", left: "5%", delay: "1.2s", dur: "11s", size: 22, path: "M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z" }, // shield
+    { top: "22%", left: "88%", delay: "0.6s", dur: "10s", size: 24, path: "M12 3v18M3 12h18" }, // plus/scan
+    { top: "60%", left: "90%", delay: "2s", dur: "12s", size: 28, path: "M12 21a9 9 0 100-18 9 9 0 000 18zm0-5v-4m0-4h.01" }, // info/report
+    { top: "88%", left: "20%", delay: "0.9s", dur: "13s", size: 20, path: "M5 13l4 4L19 7" }, // check
+  ];
+  return (
+    <>
+      {icons.map((ic, i) => (
+        <svg
+          key={i}
+          width={ic.size}
+          height={ic.size}
+          viewBox="0 0 24 24"
+          fill="none"
+          className="absolute opacity-[0.05] animate-[iconFloat_var(--dur)_ease-in-out_infinite]"
+          style={{
+            top: ic.top,
+            left: ic.left,
+            animationDelay: ic.delay,
+            animationDuration: ic.dur,
+            "--dur": ic.dur,
+          }}
+        >
+          <path d={ic.path} stroke="#14181B" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ))}
+      <style>{`
+        @keyframes iconFloat {
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          50% { transform: translateY(-16px) rotate(6deg); }
+        }
+      `}</style>
+    </>
+  );
+}
+
+/* ---------- Report-analysis illustration ---------- */
+/* Original brand-style illustration (not a copy of any stock/Lottie art) —
+   a small "analyst" bot reading a report on a laptop, with an orbiting ring
+   chart and rising bars. `mode="idle"` keeps it calm; `mode="active"` speeds
+   the scan line and orbit to signal real work in progress. */
+function ReportBot({ mode = "idle" }) {
+  const active = mode === "active";
+  return (
+    <div className="relative mx-auto flex h-40 w-full max-w-[220px] items-center justify-center">
+      <svg viewBox="0 0 220 170" width="100%" height="100%" fill="none">
+        {/* orbiting dashed ring, chart-like */}
+        <g style={{ transformOrigin: "168px 46px", animation: `spin ${active ? "3.5s" : "9s"} linear infinite` }}>
+          <circle cx="168" cy="46" r="20" stroke="#E4572E" strokeWidth="2" strokeDasharray="4 6" opacity="0.55" />
+        </g>
+        <circle cx="168" cy="46" r="9" fill="#1F5C45" opacity="0.15" />
+        <path
+          d="M168 37a9 9 0 010 18"
+          stroke="#1F5C45"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          style={{ animation: `pulseOpacity ${active ? "1.4s" : "2.6s"} ease-in-out infinite` }}
+        />
+
+        {/* laptop base */}
+        <rect x="46" y="96" width="112" height="70" rx="6" fill="white" stroke="#14181B" strokeOpacity="0.15" strokeWidth="1.6" />
+        <rect x="54" y="104" width="96" height="54" rx="3" fill="#14181B" fillOpacity="0.04" />
+        {/* screen scan line */}
+        <rect
+          x="54"
+          y="104"
+          width="96"
+          height="3"
+          rx="1.5"
+          fill="#E4572E"
+          opacity="0.7"
+          style={{
+            animation: `scanY ${active ? "1.6s" : "3.2s"} ease-in-out infinite`,
+          }}
+        />
+        {/* bar chart on screen, growing/shrinking */}
+        {[0, 1, 2, 3].map((i) => (
+          <rect
+            key={i}
+            x={64 + i * 20}
+            width="10"
+            rx="2"
+            fill="#1F5C45"
+            fillOpacity="0.55"
+            y={140}
+            height="10"
+            style={{
+              transformOrigin: `${64 + i * 20 + 5}px 150px`,
+              animation: `barGrow ${active ? "1.8s" : "3.4s"} ease-in-out ${i * 0.18}s infinite`,
+            }}
+          />
+        ))}
+        <rect x="40" y="164" width="124" height="5" rx="2.5" fill="#14181B" fillOpacity="0.12" />
+
+        {/* bot head, gentle bob */}
+        <g style={{ animation: `bob ${active ? "1.8s" : "3s"} ease-in-out infinite` }}>
+          <rect x="82" y="40" width="46" height="36" rx="12" fill="#14181B" />
+          <rect x="100" y="26" width="10" height="16" rx="4" fill="#14181B" />
+          <circle cx="105" cy="24" r="4" fill="#E4572E" />
+          {/* eyes blink */}
+          <g style={{ animation: "blink 3.6s ease-in-out infinite" }}>
+            <circle cx="96" cy="58" r="4.5" fill="#F1ECDF" />
+            <circle cx="114" cy="58" r="4.5" fill="#F1ECDF" />
+          </g>
+          {/* arm pointing at laptop */}
+          <rect x="66" y="66" width="20" height="7" rx="3.5" fill="#14181B" />
+        </g>
+      </svg>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes bob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-5px); }
+        }
+        @keyframes blink {
+          0%, 92%, 100% { transform: scaleY(1); }
+          96% { transform: scaleY(0.1); }
+        }
+        @keyframes scanY {
+          0% { transform: translateY(0); opacity: 0.7; }
+          50% { transform: translateY(48px); opacity: 1; }
+          100% { transform: translateY(0); opacity: 0.7; }
+        }
+        @keyframes barGrow {
+          0%, 100% { transform: scaleY(0.6); }
+          50% { transform: scaleY(1.6); }
+        }
+        @keyframes pulseOpacity {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -495,15 +668,30 @@ function IdleHint({ plan }) {
       ? ["Functional tests", "SEO & accessibility", "AI recommendations"]
       : ["SEO & accessibility", "Performance", "Content & images"];
 
+  const estimate = PLAN_ESTIMATE_SECONDS[plan] || 180;
+  const estimateLabel = `${Math.max(1, Math.round(estimate / 60) - 1)}–${Math.round(estimate / 60) + 1} min`;
+
   return (
-    <div className="rounded-sm border border-dashed border-[#14181B]/20 bg-white p-6">
-      <p
-        className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/40"
-        style={{ fontFamily: "'IBM Plex Mono', monospace" }}
-      >
-        What we'll check
-      </p>
-      <ul className="mt-3 flex flex-wrap gap-2">
+    <div className="overflow-hidden rounded-xl border border-[#14181B]/10 bg-white shadow-[0_1px_0_rgba(20,24,27,0.03)]">
+      <div className="border-b border-dashed border-[#14181B]/12 bg-gradient-to-b from-[#14181B]/[0.02] to-transparent px-6 pb-2 pt-5">
+        <ReportBot mode="idle" />
+      </div>
+      <div className="p-6">
+        <div className="flex items-center justify-between">
+          <p
+            className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/40"
+            style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+          >
+            What we'll check
+          </p>
+          <span
+            className="rounded-full bg-[#14181B]/[0.05] px-2.5 py-1 text-[10px] font-semibold text-[#14181B]/50"
+            style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+          >
+            ~{estimateLabel}
+          </span>
+        </div>
+        <ul className="mt-3 flex flex-wrap gap-2">
         {items.map((item, i) => (
           <li
             key={item}
@@ -513,46 +701,103 @@ function IdleHint({ plan }) {
             {item}
           </li>
         ))}
-      </ul>
+        </ul>
+      </div>
     </div>
   );
 }
 
+/* ---------- Running state ---------- */
+/*
+ * Real report generation runs 3–5 minutes depending on plan, and the API only
+ * resolves once — there's no server-sent progress. So instead of a fake timer
+ * that finishes in a few seconds, this tracks real elapsed time and eases the
+ * bar toward ~96% across the plan's expected duration, then holds there
+ * (rather than looking "stuck" at 100%) until the fetch actually resolves and
+ * the parent flips status to "done"/"error".
+ */
 function RunningState({ plan }) {
-  const steps =
+  const stepGroups =
     plan === "premium"
-      ? ["Running functional tests", "Checking SEO & accessibility", "Full security audit", "Content, UX & CRO audit", "Building your PDF"]
+      ? [
+          { label: "Running functional tests", detail: "20 modules across nav, forms, auth & sessions" },
+          { label: "Full security audit", detail: "Headers, exposed endpoints & known misconfigurations" },
+          { label: "SEO & accessibility sweep", detail: "Meta, semantics, contrast, keyboard nav" },
+          { label: "Content, UX & CRO review", detail: "Copy clarity, funnels, conversion friction" },
+          { label: "Compiling your PDF", detail: "Scoring, grading & formatting the report" },
+        ]
       : plan === "standard"
-      ? ["Running functional tests", "Advanced SEO & accessibility", "Generating AI recommendations", "Building your PDF"]
-      : ["Checking SEO & accessibility", "Checking performance", "Validating content & images", "Building your PDF"];
+      ? [
+          { label: "Running functional tests", detail: "20 modules across nav, forms, auth & sessions" },
+          { label: "Advanced SEO & accessibility", detail: "Meta, semantics, contrast, keyboard nav" },
+          { label: "Generating AI recommendations", detail: "Turning findings into fix suggestions" },
+          { label: "Compiling your PDF", detail: "Scoring, grading & formatting the report" },
+        ]
+      : [
+          { label: "Checking SEO & accessibility", detail: "Meta tags, headings, alt text, contrast" },
+          { label: "Checking performance", detail: "Load weight, render-blocking assets" },
+          { label: "Validating content & images", detail: "Broken links, missing images, copy issues" },
+          { label: "Compiling your PDF", detail: "Scoring, grading & formatting the report" },
+        ];
 
-  // Simulated progress — real completion time is unknown, so we advance through
-  // steps on a timer and simply hold at the last step until the API responds.
-  const [activeIndex, setActiveIndex] = useState(0);
-  const intervalRef = useRef(null);
+  const totalSeconds = PLAN_ESTIMATE_SECONDS[plan] || 180;
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setActiveIndex((prev) => (prev < steps.length - 1 ? prev + 1 : prev));
-    }, 1900);
-    return () => clearInterval(intervalRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const started = Date.now();
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
   }, []);
 
-  const targetPct = Math.round(((activeIndex + 0.5) / steps.length) * 100);
-  const displayPct = Math.min(96, targetPct);
+  // Ease toward 96% using the plan's real expected duration as the time constant —
+  // fast early progress, slowing down, never claiming "done" before the API says so.
+  const progressFraction = 1 - Math.exp(-elapsed / (totalSeconds / 2.2));
+  const displayPct = Math.min(96, Math.round(progressFraction * 96));
 
-  const size = 44;
-  const stroke = 3.5;
+  const activeIndex = Math.min(
+    stepGroups.length - 1,
+    Math.floor((elapsed / totalSeconds) * stepGroups.length)
+  );
+
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const elapsedLabel = `${mins}:${secs.toString().padStart(2, "0")}`;
+
+  const size = 52;
+  const stroke = 4;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (displayPct / 100) * circumference;
 
   return (
-    <div className="rounded-sm border border-[#14181B]/12 bg-white p-6 animate-[fadeIn_0.3s_ease-out]">
-      <div className="flex items-center gap-4">
+    <div className="relative overflow-hidden rounded-xl border border-[#14181B]/10 bg-white/70 p-6 shadow-[0_1px_0_rgba(20,24,27,0.04)] backdrop-blur-xl animate-[fadeIn_0.35s_ease-out]">
+      {/* ambient gradient orbs, trend: soft glassmorphism */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -left-10 -top-16 h-40 w-40 rounded-full bg-[#E4572E]/10 blur-3xl animate-[driftA_7s_ease-in-out_infinite]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-16 -right-10 h-44 w-44 rounded-full bg-[#1F5C45]/10 blur-3xl animate-[driftB_8.5s_ease-in-out_infinite]"
+      />
+
+      <div className="relative border-b border-[#14181B]/8 pb-2 -mt-1">
+        <ReportBot mode="active" />
+      </div>
+
+      <div className="relative mt-4 flex items-center gap-4">
         <div className="relative shrink-0" style={{ width: size, height: size }}>
-          <svg width={size} height={size} className="-rotate-90">
+          {/* rotating conic glow ring behind the progress ring */}
+          <div
+            className="absolute inset-[-6px] rounded-full opacity-70 animate-[spin_3.2s_linear_infinite]"
+            style={{
+              background:
+                "conic-gradient(from 0deg, rgba(228,87,46,0) 0deg, rgba(228,87,46,0.55) 90deg, rgba(228,87,46,0) 180deg)",
+            }}
+          />
+          <svg width={size} height={size} className="-rotate-90 relative">
             <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(20,24,27,0.08)" strokeWidth={stroke} />
             <circle
               cx={size / 2}
@@ -564,45 +809,64 @@ function RunningState({ plan }) {
               strokeLinecap="round"
               strokeDasharray={circumference}
               strokeDashoffset={offset}
-              style={{ transition: "stroke-dashoffset 0.6s ease-out" }}
+              style={{ transition: "stroke-dashoffset 0.8s ease-out" }}
             />
           </svg>
           <div
-            className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-[#14181B]"
+            className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-[#14181B]"
             style={{ fontFamily: "'IBM Plex Mono', monospace" }}
           >
             {displayPct}%
           </div>
         </div>
+
         <div className="flex-1">
-          <p className="text-sm font-semibold text-[#14181B]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
-            Analyzing your site…
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-[#14181B]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              Analyzing your site…
+            </p>
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#1F5C45]/60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#1F5C45]" />
+            </span>
+          </div>
+          <p className="text-xs text-[#14181B]/45">
+            Real audits take a few minutes — feel free to keep this tab open in the background.
           </p>
-          <p className="text-xs text-[#14181B]/45">This can take a minute — running real checks against your site.</p>
+        </div>
+
+        <div
+          className="shrink-0 rounded-full border border-[#14181B]/10 bg-[#14181B]/[0.03] px-2.5 py-1 text-[10px] font-semibold tabular-nums text-[#14181B]/55"
+          style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+        >
+          {elapsedLabel}
         </div>
       </div>
 
-      <div className="mt-5 h-1 w-full overflow-hidden rounded-full bg-[#14181B]/10">
+      {/* shimmering progress bar, trend: gradient sheen instead of flat fill */}
+      <div className="relative mt-5 h-1.5 w-full overflow-hidden rounded-full bg-[#14181B]/10">
         <div
-          className="h-full rounded-full bg-[#E4572E] transition-[width] duration-700 ease-out"
-          style={{ width: `${displayPct}%` }}
+          className="relative h-full rounded-full bg-gradient-to-r from-[#E4572E] via-[#F16A40] to-[#E4572E] transition-[width] duration-700 ease-out"
+          style={{ width: `${displayPct}%`, backgroundSize: "200% 100%", animation: "sheen 2.2s linear infinite" }}
         />
       </div>
 
-      <ul className="mt-5 divide-y divide-[#14181B]/8 border-t border-[#14181B]/8 text-xs" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
-        {steps.map((step, i) => {
+      <ul className="relative mt-5 divide-y divide-[#14181B]/8 border-t border-[#14181B]/8 text-xs" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+        {stepGroups.map((step, i) => {
           const isDone = i < activeIndex;
           const isActive = i === activeIndex;
           return (
             <li
-              key={step}
-              className={`flex items-center gap-2.5 px-1 py-2.5 transition-colors duration-300 ${
-                isActive ? "bg-[#1F5C45]/[0.04]" : ""
+              key={step.label}
+              className={`flex items-start gap-2.5 px-1 py-2.5 transition-all duration-500 ${
+                isActive ? "bg-[#1F5C45]/[0.05]" : ""
               } ${isDone ? "text-[#14181B]/35" : isActive ? "text-[#14181B]" : "text-[#14181B]/30"}`}
             >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
                 {isDone ? (
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[#1F5C45] text-[#1F5C45]">✓</span>
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[#1F5C45] text-[#1F5C45] animate-[popIn_0.3s_cubic-bezier(0.22,1,0.36,1)_both]">
+                    ✓
+                  </span>
                 ) : isActive ? (
                   <span className="relative flex h-2.5 w-2.5">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#E4572E]/60" />
@@ -612,11 +876,49 @@ function RunningState({ plan }) {
                   <span className="h-1.5 w-1.5 rounded-full bg-[#14181B]/20" />
                 )}
               </span>
-              <span className={isActive ? "font-semibold" : ""}>{step}</span>
+              <span className="flex-1">
+                <span className={isActive ? "font-semibold" : ""}>{step.label}</span>
+                {isActive && (
+                  <span className="mt-0.5 block text-[10px] font-normal normal-case text-[#14181B]/40 animate-[fadeIn_0.4s_ease-out]">
+                    {step.detail}
+                  </span>
+                )}
+              </span>
             </li>
           );
         })}
       </ul>
+
+      <style>{`
+        @keyframes sheen {
+          from { background-position: 200% 0; }
+          to { background-position: 0 0; }
+        }
+        @keyframes driftA {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50% { transform: translate(14px, 10px) scale(1.08); }
+        }
+        @keyframes driftB {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50% { transform: translate(-12px, -8px) scale(1.1); }
+        }
+        @keyframes popIn {
+          0% { opacity: 0; transform: scale(0.6); }
+          70% { opacity: 1; transform: scale(1.12); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
