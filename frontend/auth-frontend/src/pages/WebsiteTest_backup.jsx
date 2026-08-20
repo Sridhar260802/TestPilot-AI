@@ -52,17 +52,7 @@ export default function WebsiteTest() {
   const rawPlan = user?.plan || null;
   // Only treat it as an active plan if it actually matches a known tier —
   // guards against "", "null" (string), or any unexpected value crashing the page.
-  const purchasedPlan = rawPlan && PLAN_COPY[rawPlan] ? rawPlan : null;
-
-  // TEMP: while Razorpay isn't wired up, a user may have no purchased plan
-  // yet (purchasedPlan === null — e.g. fresh Google sign-in). Instead of
-  // hard-blocking them, let them pick a plan locally just to run a test.
-  // This choice is NOT saved to their account/backend - it's only used to
-  // pick which /plans/<x>/report endpoint this page calls, and the backend
-  // is currently open to any logged-in user for any plan (see
-  // TEMP_ALLOW_ALL_PLANS_NO_PAYMENT in app/core/plans.py).
-  const [tempPlan, setTempPlan] = useState(null);
-  const plan = purchasedPlan || tempPlan;
+  const plan = rawPlan && PLAN_COPY[rawPlan] ? rawPlan : null;
   const copy = plan ? PLAN_COPY[plan] : null;
 
   const [url, setUrl] = useState("");
@@ -141,7 +131,7 @@ export default function WebsiteTest() {
 
       {!plan ? (
         <div className="relative z-10">
-          <NoPlanState onSelectPlan={setTempPlan} />
+          <NoPlanState />
         </div>
       ) : (
         <div className="relative z-10 mx-auto max-w-xl px-4 py-14 sm:px-6">
@@ -562,7 +552,7 @@ function ReportBot({ mode = "idle" }) {
   );
 }
 
-function NoPlanState({ onSelectPlan }) {
+function NoPlanState() {
   const navigate = useNavigate();
 
   return (
@@ -628,22 +618,15 @@ function NoPlanState({ onSelectPlan }) {
         </button>
       </div>
 
-      {/* TEMP: clickable plan chips — payments aren't live yet, so this lets
-          the user try any tier's test right now. Selection is local only,
-          nothing is saved to their account or charged. */}
-      <p className="relative mt-8 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/35" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
-        Or try a plan now (free while we set up payments)
-      </p>
-      <ul className="relative mt-3 flex flex-wrap items-center justify-center gap-2">
-        {["basic", "standard", "premium"].map((p, i) => (
-          <li key={p} style={{ animationDelay: `${0.32 + i * 0.06}s` }} className="animate-[fadeSlideUp_0.4s_cubic-bezier(0.22,1,0.36,1)_both]">
-            <button
-              type="button"
-              onClick={() => onSelectPlan?.(p)}
-              className="rounded-full border border-[#14181B]/12 bg-white px-3.5 py-1.5 text-xs font-medium capitalize text-[#14181B]/70 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#1F5C45]/40 hover:text-[#1F5C45] active:scale-[0.97]"
-            >
-              {p}
-            </button>
+      {/* tiny plan chips, staggered in, purely decorative hint of what's on offer */}
+      <ul className="relative mt-8 flex flex-wrap items-center justify-center gap-2">
+        {["Basic", "Standard", "Premium"].map((p, i) => (
+          <li
+            key={p}
+            style={{ animationDelay: `${0.32 + i * 0.06}s` }}
+            className="animate-[fadeSlideUp_0.4s_cubic-bezier(0.22,1,0.36,1)_both] rounded-full border border-[#14181B]/12 bg-white px-3.5 py-1.5 text-xs font-medium text-[#14181B]/60 transition-all duration-200 hover:-translate-y-0.5 hover:border-[#14181B]/25 hover:text-[#14181B]"
+          >
+            {p}
           </li>
         ))}
       </ul>

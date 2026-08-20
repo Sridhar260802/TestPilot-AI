@@ -8,6 +8,7 @@ import Pricing from "./pages/Pricing";
 import History from "./pages/History";
 import Checkout from "./pages/Checkout";
 import WebsiteTest from "./pages/WebsiteTest";
+import MobileAppTest from "./pages/MobileAppTest";
 import Contact from "./pages/Contact";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -57,6 +58,14 @@ function App() {
         element={
           <ProtectedRoute>
             <WebsiteTest />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mobile-test"
+        element={
+          <ProtectedRoute>
+            <MobileAppTest />
           </ProtectedRoute>
         }
       />

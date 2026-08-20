@@ -46,6 +46,7 @@ export default function Dashboard() {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [pricingTab, setPricingTab] = useState("web");
 
   useEffect(() => {
     // Refresh from the server in case the plan changed elsewhere.
@@ -199,6 +200,12 @@ export default function Dashboard() {
                   Test a website →
                 </Link>
                 <Link
+                  to="/mobile-test"
+                  className="rounded-sm border border-[#1F5C45]/40 bg-[#1F5C45]/[0.06] px-5 py-2.5 text-sm font-semibold text-[#1F5C45] transition-all duration-200 hover:border-[#1F5C45] hover:bg-[#1F5C45] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F5C45] active:scale-[0.98]"
+                >
+                  Test a mobile app (APK/IPA) →
+                </Link>
+                <Link
                   to="/pricing"
                   className="rounded-sm border border-[#14181B]/25 px-5 py-2.5 text-sm font-semibold text-[#14181B] transition-all duration-200 hover:border-[#14181B] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#14181B] active:scale-[0.98]"
                 >
@@ -245,6 +252,11 @@ export default function Dashboard() {
         </div>
 
         {/* ---------------------------------------------------------- */}
+        {/* Ticker — what's under the hood, scrolling like a log feed   */}
+        {/* ---------------------------------------------------------- */}
+        <MarqueeStrip />
+
+        {/* ---------------------------------------------------------- */}
         {/* Ledger — stat row                                           */}
         {/* ---------------------------------------------------------- */}
         <p
@@ -268,6 +280,13 @@ export default function Dashboard() {
             delay={0.46}
           />
         </div>
+
+        {/* ---------------------------------------------------------- */}
+        {/* Report preview — what actually lands in your inbox          */}
+        {/* ---------------------------------------------------------- */}
+        <Reveal className="mt-12">
+          <ReportPreviewCard />
+        </Reveal>
 
         {/* ---------------------------------------------------------- */}
         {/* Recent audits — the websites this user has tested            */}
@@ -333,7 +352,7 @@ export default function Dashboard() {
         {/* ---------------------------------------------------------- */}
         {/* Process log                                                 */}
         {/* ---------------------------------------------------------- */}
-        <Reveal className="mt-16">
+        <Reveal className="mt-12">
           <SectionEyebrow>Process log</SectionEyebrow>
           <h2 className="mt-1.5 text-2xl font-semibold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             How Crosbytech works
@@ -351,7 +370,7 @@ export default function Dashboard() {
         {/* ---------------------------------------------------------- */}
         {/* Checklist — what we test                                    */}
         {/* ---------------------------------------------------------- */}
-        <Reveal className="mt-16">
+        <Reveal className="mt-12">
           <SectionEyebrow>Coverage</SectionEyebrow>
           <h2 className="mt-1.5 text-2xl font-semibold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             What we test
@@ -366,10 +385,23 @@ export default function Dashboard() {
         </Reveal>
 
         {/* ---------------------------------------------------------- */}
+        {/* FAQ — questions filed and answered                          */}
+        {/* ---------------------------------------------------------- */}
+        <Reveal className="mt-12">
+          <SectionEyebrow>FAQ</SectionEyebrow>
+          <h2 className="mt-1.5 text-2xl font-semibold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            Questions, answered
+          </h2>
+          <p className="mt-1.5 text-sm text-[#14181B]/55">Everything worth knowing before your first audit.</p>
+
+          <FaqAccordion items={FAQ_ITEMS} />
+        </Reveal>
+
+        {/* ---------------------------------------------------------- */}
         {/* Pricing — audit tickets                                     */}
         {/* ---------------------------------------------------------- */}
-        <Reveal className="mt-16">
-          <div className="flex items-end justify-between gap-4">
+        <Reveal className="mt-12">
+          <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <SectionEyebrow>Pricing</SectionEyebrow>
               <h2 className="mt-1.5 text-2xl font-semibold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
@@ -385,8 +417,33 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
-            {PRICING_PREVIEW.map((p, i) => (
+          {/* Website Testing / APK Testing toggle */}
+          <div className="relative mx-auto mt-6 flex w-fit rounded-full border border-[#14181B]/12 bg-white p-1">
+            <span
+              className="absolute h-8 w-[124px] rounded-full bg-[#14181B] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={{ transform: pricingTab === "web" ? "translateX(4px)" : "translateX(132px)" }}
+              aria-hidden="true"
+            />
+            {[
+              { id: "web", label: "Website testing" },
+              { id: "apk", label: "APK testing" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setPricingTab(t.id)}
+                aria-pressed={pricingTab === t.id}
+                className={`relative z-10 w-[124px] rounded-full py-1.5 text-xs font-semibold transition-colors duration-300 ${
+                  pricingTab === t.id ? "text-white" : "text-[#14181B]/55 hover:text-[#14181B]"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div key={pricingTab} className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3 animate-[fadeIn_0.35s_ease-out_both]">
+            {(pricingTab === "web" ? PRICING_PREVIEW : MOBILE_PRICING_PREVIEW).map((p, i) => (
               <TicketCard key={p.id} {...p} isCurrent={plan === p.id} delay={0.1 + i * 0.08} />
             ))}
           </div>
@@ -402,16 +459,21 @@ export default function Dashboard() {
         {/* ---------------------------------------------------------- */}
         {/* Contact — directory                                         */}
         {/* ---------------------------------------------------------- */}
-        <Reveal className="mt-16 mb-6">
+        <Reveal className="mt-12 mb-6">
           <SectionEyebrow>Support</SectionEyebrow>
           <h2 className="mt-1.5 text-2xl font-semibold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
             Get in touch
           </h2>
           <p className="mt-1.5 text-sm text-[#14181B]/55">Questions about a report or your plan? We're here to help.</p>
 
-          <div className="mt-6 grid grid-cols-1 divide-y divide-[#14181B]/10 rounded-md border border-[#14181B]/12 bg-white sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            <DirectoryCell label="Email" value="support@crosbytech.com" href="mailto:support@crosbytech.com" delay={0.1} />
-            
+          <div className="mt-6 flex justify-center rounded-md border border-[#14181B]/12 bg-white">
+            <DirectoryCell
+              label="Email"
+              value="support@crosbytech.com"
+              href="mailto:support@crosbytech.com"
+              delay={0.1}
+              className="text-center"
+            />
           </div>
         </Reveal>
 
@@ -441,15 +503,26 @@ export default function Dashboard() {
             <p className="relative mx-auto mt-2 max-w-md text-sm text-white/60">
               Run your first test and get a full PDF report in minutes.
             </p>
-            <Link
-              to="/test"
-              className="relative mt-5 inline-flex items-center gap-2 rounded-sm bg-[#E4572E] px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#F16A40] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-[0.98]"
-            >
-              Test a website
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M5 12h14M13 6l6 6-6 6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
+            <div className="relative mt-5 flex flex-wrap items-center justify-center gap-3">
+              <Link
+                to="/test"
+                className="inline-flex items-center gap-2 rounded-sm bg-[#E4572E] px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#F16A40] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-[0.98]"
+              >
+                Test a website
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </Link>
+              <Link
+                to="/mobile-test"
+                className="inline-flex items-center gap-2 rounded-sm border border-white/25 px-6 py-3 text-sm font-semibold text-white transition-all duration-200 hover:border-white hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-[0.98]"
+              >
+                Test a mobile app
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </Link>
+            </div>
           </div>
         </Reveal>
       </div>
@@ -483,6 +556,22 @@ export default function Dashboard() {
           0% { opacity: 0; transform: rotate(-14deg) scale(1.6); }
           60% { opacity: 1; transform: rotate(-8deg) scale(0.94); }
           100% { opacity: 1; transform: rotate(-8deg) scale(1); }
+        }
+        @keyframes marquee {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        @keyframes barGrow {
+          from { transform: scaleY(0); }
+          to { transform: scaleY(1); }
+        }
+        @keyframes barGrowX {
+          from { transform: scaleX(0); }
+          to { transform: scaleX(1); }
+        }
+        @keyframes ringIn {
+          from { stroke-dashoffset: var(--ring-circumference); }
+          to { stroke-dashoffset: var(--ring-offset); }
         }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
@@ -530,6 +619,218 @@ function StampBadge({ plan }) {
       }}
     >
       {label}
+    </div>
+  );
+}
+
+const TICKER_ITEMS = [
+  "SEO", "Accessibility", "Performance", "Security", "Content & UX",
+  "Browser compatibility", "Mobile app security",
+];
+
+/** Thin scrolling strip of what gets checked — reinforces the "live log" motif from the hero. */
+function MarqueeStrip() {
+  const loop = [...TICKER_ITEMS, ...TICKER_ITEMS];
+  return (
+    <div
+      className="relative mt-6 overflow-hidden rounded-md border border-[#14181B]/12 bg-white py-3 animate-[fadeIn_0.4s_ease-out_0.36s_both]"
+      aria-hidden="true"
+    >
+      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-14 bg-gradient-to-r from-white to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-14 bg-gradient-to-l from-white to-transparent" />
+      <div className="flex w-max animate-[marquee_24s_linear_infinite] gap-10 whitespace-nowrap px-4 hover:[animation-play-state:paused]">
+        {loop.map((item, i) => (
+          <span
+            key={i}
+            className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/40"
+            style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[#1F5C45]" />
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Animated circular score ring — the overall audit score, drawn on load like a gauge filling in. */
+function ScoreGauge({ score }) {
+  const size = 76;
+  const stroke = 7;
+  const r = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - score / 100);
+  const color = score >= 80 ? "#1F5C45" : score >= 50 ? "#E4572E" : "#E4572E";
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#14181B14" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          style={{
+            "--ring-circumference": circumference,
+            "--ring-offset": offset,
+            animation: "ringIn 1s cubic-bezier(0.22,1,0.36,1) 0.2s both",
+          }}
+        />
+      </svg>
+      <div
+        className="absolute inset-0 flex flex-col items-center justify-center"
+        style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+      >
+        <span className="text-lg font-bold text-[#14181B] animate-[numberIn_0.3s_ease-out_0.6s_both]">
+          <CountUp value={score} duration={900} />
+        </span>
+        <span className="text-[8px] font-semibold uppercase tracking-[0.15em] text-[#14181B]/40">score</span>
+      </div>
+    </div>
+  );
+}
+
+/** A small illustrative mock of what a filed report actually looks like — score bars + summary lines. */
+function ReportPreviewCard() {
+  return (
+    <div className="group relative overflow-hidden rounded-md border border-[#14181B]/12 bg-white p-6 transition-shadow duration-300 hover:shadow-[0_16px_36px_-16px_rgba(20,24,27,0.18)] sm:p-8">
+      <div className="flex flex-col gap-8 sm:flex-row sm:items-center">
+        <div className="flex-1">
+          <SectionEyebrow>Inside every report</SectionEyebrow>
+          <h3 className="mt-2 text-xl font-semibold tracking-tight" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+            A filed, scored, and readable PDF
+          </h3>
+          <p className="mt-2 max-w-sm text-sm leading-relaxed text-[#14181B]/60">
+            Every audit closes out the same way — an overall score, a category-by-category
+            breakdown, and a plain-English list of what to fix first.
+          </p>
+        </div>
+
+        <div className="w-full max-w-[300px] shrink-0 rounded-sm border border-[#14181B]/12 bg-[#F1ECDF] p-5 transition-transform duration-300 group-hover:-translate-y-1.5 group-hover:rotate-[0.4deg]">
+          <div className="flex items-center justify-between">
+            <span
+              className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/40"
+              style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+            >
+              audit_report.pdf
+            </span>
+            <span className="h-2 w-2 rounded-full bg-[#1F5C45]" />
+          </div>
+
+          <div className="mt-4 flex items-center gap-4">
+            <ScoreGauge score={82} />
+
+            <div className="flex-1 space-y-2.5">
+              {[
+                { label: "SEO", w: 90, color: "#1F5C45" },
+                { label: "A11y", w: 68, color: "#E4572E" },
+                { label: "Perf", w: 78, color: "#1F5C45" },
+                { label: "Sec", w: 95, color: "#1F5C45" },
+              ].map((row, i) => (
+                <div
+                  key={row.label}
+                  className="animate-[fadeIn_0.4s_ease-out_both]"
+                  style={{ animationDelay: `${0.35 + i * 0.08}s` }}
+                >
+                  <div className="flex items-center justify-between text-[9px] font-semibold uppercase tracking-[0.15em] text-[#14181B]/45" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                    <span>{row.label}</span>
+                    <span>{row.w}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[#14181B]/10">
+                    <span
+                      className="block h-full origin-left rounded-full"
+                      style={{
+                        width: `${row.w}%`,
+                        backgroundColor: row.color,
+                        animation: `barGrowX 0.7s cubic-bezier(0.22,1,0.36,1) ${0.4 + i * 0.08}s both`,
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 border-t border-dashed border-[#14181B]/15 pt-3 text-[10px] text-[#14181B]/50">
+            <span className="text-[#1F5C45]">✓</span>
+            3 checks passed · 2 flagged for review
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const FAQ_ITEMS = [
+  {
+    q: "What can I test — websites, apps, or both?",
+    a: "Both. Run a website audit with just a URL, or upload a mobile .apk/.ipa for a static security scan — no install, device, or emulator needed either way.",
+  },
+  {
+    q: "How long does a scan take?",
+    a: "Most website audits finish in a couple of minutes. Mobile scans depend on app size and plan depth — Premium's deep pass takes a little longer than Basic.",
+  },
+  {
+    q: "Can I re-download an old report?",
+    a: "Yes — every scan is saved to your History page, and the original PDF stays downloadable there whenever you need it again.",
+  },
+  {
+    q: "What happens if I switch plans?",
+    a: "Your new plan applies to your very next scan — nothing else to reconfigure.",
+  },
+  {
+    q: "Do I need to install anything to test a mobile app?",
+    a: "No. Upload the .apk or .ipa file directly and we unpack and analyze it statically — your device or emulator never comes into it.",
+  },
+];
+
+/** Single-open accordion, styled as filed questions rather than a generic FAQ widget. */
+function FaqAccordion({ items }) {
+  const [openIndex, setOpenIndex] = useState(0);
+
+  return (
+    <div className="mt-6 divide-y divide-[#14181B]/10 rounded-md border border-[#14181B]/12 bg-white">
+      {items.map((item, i) => {
+        const open = openIndex === i;
+        return (
+          <div key={item.q} style={{ animation: `fadeIn 0.4s ease-out ${0.05 + i * 0.05}s both` }}>
+            <button
+              type="button"
+              onClick={() => setOpenIndex(open ? -1 : i)}
+              aria-expanded={open}
+              className="flex w-full items-center justify-between gap-4 p-5 text-left transition-colors duration-200 hover:bg-[#1F5C45]/[0.04]"
+            >
+              <span className="text-sm font-semibold text-[#14181B]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+                {item.q}
+              </span>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                className="shrink-0 text-[#14181B]/40 transition-transform duration-300"
+                style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+              >
+                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <div
+              className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+              style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+            >
+              <div className="overflow-hidden">
+                <p className="px-5 pb-5 text-xs leading-relaxed text-[#14181B]/60">{item.a}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -607,7 +908,7 @@ function LedgerCell({ label, value, hint, delay = 0 }) {
   return (
     <div
       style={{ animation: `fadeIn 0.4s ease-out ${delay}s both` }}
-      className="p-6"
+      className="group p-6 transition-colors duration-200 hover:bg-[#1F5C45]/[0.03]"
     >
       <p
         className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/40"
@@ -616,7 +917,7 @@ function LedgerCell({ label, value, hint, delay = 0 }) {
         {label}
       </p>
       <p
-        className="mt-2 text-2xl font-semibold text-[#14181B]"
+        className="mt-2 text-2xl font-semibold text-[#14181B] transition-transform duration-200 group-hover:translate-x-0.5"
         style={{ fontFamily: "'IBM Plex Mono', monospace" }}
       >
         {value == null ? (
@@ -728,24 +1029,39 @@ const FEATURES = [
   { title: "Security", text: "SSL setup, exposed headers, and common vulnerability patterns." },
   { title: "Content & UX", text: "Broken links, missing images, and copy or layout inconsistencies." },
   { title: "Browser compatibility", text: "Rendering checks across common browsers and screen sizes." },
+  {
+    title: "Mobile app security",
+    text: "Upload an .apk or .ipa — permissions, exported components, hardcoded secrets, and weak crypto.",
+    isMobile: true,
+  },
 ];
 
-function ChecklistRow({ title, text, delay = 0 }) {
+function ChecklistRow({ title, text, delay = 0, isMobile = false }) {
+  const Wrapper = isMobile ? Link : "div";
   return (
-    <div
+    <Wrapper
+      {...(isMobile ? { to: "/mobile-test" } : {})}
       style={{ animation: `fadeIn 0.4s ease-out ${delay}s both` }}
       className="group flex items-start gap-4 p-5 transition-colors duration-200 hover:bg-[#1F5C45]/[0.04]"
     >
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-[#1F5C45] text-[11px] font-bold text-[#1F5C45] transition-transform duration-200 group-hover:scale-110">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 border-[#1F5C45] text-[11px] font-bold text-[#1F5C45] transition-transform duration-300 group-hover:rotate-[360deg] group-hover:scale-110">
         ✓
       </span>
       <div>
-        <h3 className="text-sm font-semibold text-[#14181B]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-[#14181B]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
           {title}
+          {isMobile && (
+            <span
+              className="rounded-full bg-[#1F5C45]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#1F5C45] transition-transform duration-200 group-hover:scale-105"
+              style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+            >
+              New
+            </span>
+          )}
         </h3>
         <p className="mt-1 text-xs leading-relaxed text-[#14181B]/55">{text}</p>
       </div>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -761,12 +1077,24 @@ const PRICING_PREVIEW = [
   { id: "premium", name: "Premium", price: 1999, features: ["Full security audit", "Content, UX & CRO audits", "Combined full audit report"] },
 ];
 
+const MOBILE_PRICING_PREVIEW = [
+  { id: "basic", name: "Basic", price: 499, features: ["Android (.apk) security scan", "Sensitive permissions report", "Basic PDF report"] },
+  {
+    id: "standard",
+    name: "Standard",
+    price: 999,
+    features: ["Android & iOS (.apk / .ipa)", "Exported components audit", "Detailed PDF report"],
+    highlighted: true,
+  },
+  { id: "premium", name: "Premium", price: 1999, features: ["Hardcoded-secret scanning", "Weak-crypto detection", "Combined full audit report"] },
+];
+
 /** Pricing card styled like a perforated audit ticket / receipt stub. */
 function TicketCard({ id, name, price, features, highlighted, isCurrent, delay = 0 }) {
   return (
     <div
       style={{ animation: `cardRise 0.5s cubic-bezier(0.22,1,0.36,1) ${delay}s both` }}
-      className={`group relative flex flex-col rounded-md p-6 transition-all duration-300 hover:-translate-y-1.5 ${
+      className={`group relative flex flex-col rounded-md p-6 transition-all duration-300 hover:-translate-y-1.5 hover:rotate-[0.3deg] ${
         highlighted ? "border-2 border-[#E4572E] bg-white shadow-[0_8px_24px_-8px_rgba(228,87,46,0.35)]" : "border border-[#14181B]/12 bg-white"
       }`}
     >
@@ -828,13 +1156,13 @@ function TicketCard({ id, name, price, features, highlighted, isCurrent, delay =
   );
 }
 
-function DirectoryCell({ label, value, href, delay = 0 }) {
+function DirectoryCell({ label, value, href, delay = 0, className = "" }) {
   const Wrapper = href ? "a" : "div";
   return (
     <Wrapper
       {...(href ? { href } : {})}
       style={{ animation: `fadeIn 0.4s ease-out ${delay}s both` }}
-      className="group p-6 transition-colors duration-200 hover:bg-[#1F5C45]/[0.04]"
+      className={`group rounded-md p-6 transition-colors duration-200 hover:bg-[#1F5C45]/[0.04] ${className}`}
     >
       <p
         className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#14181B]/40"

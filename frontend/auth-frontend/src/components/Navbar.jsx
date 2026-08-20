@@ -16,6 +16,9 @@ export default function Navbar() {
 
   const links = [
     { to: "/dashboard", label: "Home" },
+    { to: "/test", label: "Website Test" },
+    { to: "/mobile-test", label: "Mobile App Test" },
+    { to: "/history", label: "History" },
     { to: "/pricing", label: "Pricing" },
     { to: "/contact", label: "Contact Us" },
   ];

@@ -1,9 +1,10 @@
 // src/pages/Pricing.jsx
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { getStoredUser } from "../services/authService";
 
-const PLANS = [
+const WEB_PLANS = [
   {
     id: "basic",
     name: "Basic",
@@ -48,10 +49,61 @@ const PLANS = [
   },
 ];
 
+const APK_PLANS = [
+  {
+    id: "basic",
+    name: "Basic",
+    price: 499,
+    tagline: "Quick Android security check.",
+    features: [
+      "Android (.apk) security scan",
+      "Debuggable-build detection",
+      "Backup exposure check",
+      "Sensitive permissions report",
+      "Basic PDF report",
+    ],
+  },
+  {
+    id: "standard",
+    name: "Standard",
+    price: 999,
+    tagline: "Android & iOS app testing.",
+    features: [
+      "Android (.apk) & iOS (.ipa) support",
+      "Exported components audit",
+      "Transport-security (ATS) checks",
+      "Permission usage descriptions",
+      "Detailed PDF report",
+    ],
+    highlighted: true,
+  },
+  {
+    id: "premium",
+    name: "Premium",
+    price: 1999,
+    tagline: "The complete mobile app audit.",
+    features: [
+      "Everything in Standard",
+      "Hardcoded-secret scanning",
+      "Weak-cryptography detection",
+      "Certificate & provisioning inspection",
+      "Combined full audit PDF report",
+    ],
+  },
+];
+
+const TABS = [
+  { id: "web", label: "Website Testing" },
+  { id: "apk", label: "APK Testing" },
+];
+
 export default function Pricing() {
   const navigate = useNavigate();
   const user = getStoredUser();
   const currentPlan = user?.plan || null;
+  const [tab, setTab] = useState("web");
+  const plans = tab === "web" ? WEB_PLANS : APK_PLANS;
+
   return (
     <div className="min-h-screen bg-[#F7F1E1]">
       <Navbar />
@@ -65,8 +117,42 @@ export default function Pricing() {
           </p>
         </div>
 
-        <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {PLANS.map((plan, idx) => (
+        {/* ------------------------------------------------------------ */}
+        {/* Website Testing / APK Testing toggle                         */}
+        {/* ------------------------------------------------------------ */}
+        <div className="mt-8 flex justify-center animate-[fadeIn_0.5s_ease-out_0.1s_both]">
+          <div className="relative inline-flex rounded-full border border-[#0b3327]/12 bg-white p-1 shadow-sm">
+            <span
+              className="absolute inset-y-1 w-[calc(50%-4px)] rounded-full bg-[#0b3327] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={{ transform: tab === "web" ? "translateX(0%)" : "translateX(calc(100% + 8px))" }}
+              aria-hidden="true"
+            />
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                aria-pressed={tab === t.id}
+                className={`relative z-10 rounded-full px-6 py-2.5 text-sm font-semibold transition-colors duration-300 ${
+                  tab === t.id ? "text-white" : "text-[#0b3327]/60 hover:text-[#0b3327]"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="mt-3 text-center text-xs text-[#0b3327]/45 animate-[fadeIn_0.5s_ease-out_0.15s_both]">
+          {tab === "web"
+            ? "Automated audits for your website — SEO, accessibility, performance & security."
+            : "Static security analysis for your Android (.apk) or iOS (.ipa) build."}
+        </p>
+
+        {/* ------------------------------------------------------------ */}
+        {/* Plan cards — remount on tab change so the transition replays  */}
+        {/* ------------------------------------------------------------ */}
+        <div key={tab} className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-3 animate-[fadeIn_0.35s_ease-out_both]">
+          {plans.map((plan, idx) => (
             <div
               key={plan.id}
               style={{ animation: `cardRise 0.5s cubic-bezier(0.22,1,0.36,1) ${idx * 0.08}s both` }}
@@ -82,7 +168,16 @@ export default function Pricing() {
                 </span>
               )}
 
-              <h2 className={`text-lg font-semibold ${plan.highlighted ? "text-white" : "text-[#0b3327]"}`}>{plan.name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className={`text-lg font-semibold ${plan.highlighted ? "text-white" : "text-[#0b3327]"}`}>{plan.name}</h2>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                    plan.highlighted ? "bg-white/15 text-white/70" : "bg-[#0b3327]/8 text-[#0b3327]/50"
+                  }`}
+                >
+                  {tab === "web" ? "Web" : "APK / IPA"}
+                </span>
+              </div>
               <p className={`mt-1 text-xs ${plan.highlighted ? "text-white/60" : "text-[#0b3327]/50"}`}>{plan.tagline}</p>
 
               <div className="mt-5 flex items-baseline gap-1">
@@ -143,6 +238,10 @@ export default function Pricing() {
             </div>
           ))}
         </div>
+
+        <p className="mt-6 text-center text-xs text-[#0b3327]/40 animate-[fadeIn_0.5s_ease-out_0.3s_both]">
+          One plan unlocks both — buy any tier once and it covers website audits and mobile app scans alike.
+        </p>
       </div>
 
       <style>{`
@@ -158,6 +257,13 @@ export default function Pricing() {
           0% { opacity: 0; transform: translateX(-50%) scale(0.5); }
           70% { opacity: 1; transform: translateX(-50%) scale(1.08); }
           100% { opacity: 1; transform: translateX(-50%) scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+          }
         }
       `}</style>
     </div>

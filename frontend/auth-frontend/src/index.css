@@ -6,3 +6,72 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Shared entrance/interaction animations used across the app
+   (mobile app test flow, result cards, list items, etc). */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-4px);
+  }
+  40%,
+  60% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out both;
+}

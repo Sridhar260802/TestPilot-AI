@@ -33,7 +33,7 @@ export default function PlanTest() {
 
       downloadPDF(
         blob,
-        "TestPilot_Basic_Report.pdf"
+        "Crosby Tech_Basic_Report.pdf"
       );
 
     } catch (error) {
@@ -52,7 +52,7 @@ export default function PlanTest() {
 
       downloadPDF(
         blob,
-        "TestPilot_Standard_Report.pdf"
+        "Crosby Tech_Standard_Report.pdf"
       );
 
     } catch (error) {
@@ -71,7 +71,7 @@ export default function PlanTest() {
 
       downloadPDF(
         blob,
-        "TestPilot_Premium_Report.pdf"
+        "Crosby Tech_Premium_Report.pdf"
       );
 
     } catch (error) {
@@ -85,7 +85,7 @@ export default function PlanTest() {
   return (
     <div style={{ padding: "40px" }}>
 
-      <h1>TestPilot Plan API Test</h1>
+      <h1>Crosby Tech Plan API Test</h1>
 
       <input
         type="url"
