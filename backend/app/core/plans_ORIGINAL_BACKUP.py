@@ -10,25 +10,6 @@ from fastapi import Depends, HTTPException, status
 
 from app.core.auth import get_current_user
 from app.models.user import User
-
-# ------------------------------------------------------------------
-# TEMPORARY SWITCH - Razorpay isn't live yet, so there's no way for a
-# user to actually pay for / get assigned a plan right now. While this
-# is True, `require_plan` lets EVERY logged-in user hit EVERY plan's
-# routes (basic, standard, premium - all 3), regardless of what
-# `current_user.plan` is set to.
-#
-# This does NOT change PLAN_RANK / PLAN_FEATURES / PLAN_PRICES - the
-# plans themselves are untouched. It only disables the gate that blocks
-# access based on `current_user.plan`.
-#
-# TO GO LIVE WITH REAL PAYMENTS: set this back to False. That's the
-# only change needed here - everything else (routers, PLAN_PRICES,
-# Razorpay integration) is already wired to work correctly once this
-# flips back.
-# ------------------------------------------------------------------
-TEMP_ALLOW_ALL_PLANS_NO_PAYMENT = True
-
 # Higher number = more access. Every tier includes everything below it.
 PLAN_RANK = {
     "basic": 1,
@@ -213,11 +194,6 @@ def require_plan(required_plan_name: str):
         raise ValueError(f"Unknown plan '{required_plan_name}'. Must be one of {VALID_PLANS}")
 
     def _dependency(current_user: User = Depends(get_current_user)) -> User:
-        # TEMP: Razorpay not connected yet - let any logged-in user through
-        # to any of the 3 plans' routes without checking current_user.plan.
-        if TEMP_ALLOW_ALL_PLANS_NO_PAYMENT:
-            return current_user
-
         # No plan assigned yet (new signup / Google sign-in that hasn't paid
         # for anything) - never fall back to "basic", block outright.
         if not current_user.plan:

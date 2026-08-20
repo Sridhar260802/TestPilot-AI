@@ -95,8 +95,7 @@ def section_heading_style():
 # Header block: logo + title + info table
 # ===============================
 
-def build_report_header(subtitle_text, url, generated_str, plan_level,
-                         title_text="WEBSITE HEALTH REPORT", id_label="Website URL"):
+def build_report_header(subtitle_text, url, generated_str, plan_level):
     """
     Builds the top-of-report block used by every plan:
 
@@ -108,17 +107,12 @@ def build_report_header(subtitle_text, url, generated_str, plan_level,
 
     Matches Crosbytech_Report_Template_With_Logo.pdf section 0/1.
     Returns a list of flowables ready to extend() onto the story.
-
-    `title_text` / `id_label` default to the website-report wording so
-    every existing call site is unaffected. Non-website reports (e.g.
-    the mobile app security report) pass their own, e.g.
-    title_text="MOBILE APP SECURITY REPORT", id_label="File Name".
     """
 
     story = []
 
     title_block = [
-        Paragraph(title_text, report_title_style()),
+        Paragraph("WEBSITE HEALTH REPORT", report_title_style()),
         Paragraph(subtitle_text, report_subtitle_style()),
     ]
 
@@ -141,7 +135,7 @@ def build_report_header(subtitle_text, url, generated_str, plan_level,
         )
         story.append(head_table)
     else:
-        story.append(Paragraph(title_text, report_title_style()))
+        story.append(Paragraph("WEBSITE HEALTH REPORT", report_title_style()))
         story.append(Paragraph(subtitle_text, report_subtitle_style()))
 
     story.append(Spacer(1, 0.18 * inch))
@@ -156,7 +150,7 @@ def build_report_header(subtitle_text, url, generated_str, plan_level,
     info_table = Table(
         [
             [
-                Paragraph(id_label, label_style),
+                Paragraph("Website URL", label_style),
                 Paragraph(url or "N/A", value_style),
                 "",
                 "",
@@ -468,140 +462,6 @@ def format_ai_recommendations(text, normal_style):
             story.append(Paragraph(content, bullet_style))
 
     return story
-
-
-# ===============================
-# Generic helpers for non-website reports (e.g. mobile app scans) that
-# still want to look like a Crosbytech report - same olive brand, same
-# grid/zebra-stripe language as the tables above - without forcing them
-# through the website-specific summary_scores_table (which derives its
-# "Status" purely from a score band, e.g. 80+ = "Good"). A mobile scan's
-# severity comes from its worst individual finding, not a score band, so
-# it needs its own value shown as-is instead of recomputed.
-# ===============================
-
-SEVERITY_STATUS_COLOR = {
-    "Critical": "#B00020",
-    "High": "#E65100",
-    "Medium": "#F9A825",
-    "Low": "#2E7D32",
-    "Info": "#1565C0",
-}
-
-
-def score_severity_table(score, severity, score_label="Security Score", severity_label="Severity"):
-    """Two-column Score / Severity header, olive-branded - same visual
-    weight as the website report's score tables, but shows the severity
-    value exactly as passed in (not recomputed from the score)."""
-
-    label_style = ParagraphStyle(
-        "ScoreSevLabel", fontName="Helvetica-Bold", fontSize=10, textColor=colors.white,
-    )
-    value_style = ParagraphStyle(
-        "ScoreSevValue", fontName="Helvetica-Bold", fontSize=13, alignment=1,
-    )
-    color = SEVERITY_STATUS_COLOR.get(severity, "#333333")
-
-    data = [
-        [Paragraph(score_label, label_style), Paragraph(severity_label, label_style)],
-        [
-            Paragraph(f"{score}/100", value_style),
-            Paragraph(f'<font color="{color}">{severity}</font>', value_style),
-        ],
-    ]
-    t = Table(data, colWidths=[CONTENT_WIDTH / 2, CONTENT_WIDTH / 2])
-    t.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), OLIVE_ACCENT),
-                ("BACKGROUND", (0, 1), (-1, 1), colors.whitesmoke),
-                ("GRID", (0, 0), (-1, -1), 0.5, BORDER_GREY),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-            ]
-        )
-    )
-    return t
-
-
-def key_value_table(rows, col_widths=None, header=None):
-    """Generic 2-column key/value table (app overview, permissions,
-    provisioning-profile details, etc.) in the same olive/zebra-stripe
-    style as the rest of the template. Pass `header=[label, value]` to
-    get an olive header row instead of a plain grid."""
-
-    cell_style = ParagraphStyle("KVCell", fontName="Helvetica", fontSize=9.5, leading=12)
-    cell_bold = ParagraphStyle("KVCellBold", parent=cell_style, fontName="Helvetica-Bold")
-
-    data = []
-    style_cmds = [
-        ("GRID", (0, 0), (-1, -1), 0.4, BORDER_GREY),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-    ]
-
-    start_row = 0
-    if header:
-        header_cell = ParagraphStyle("KVHeader", parent=cell_bold, textColor=colors.white)
-        data.append([Paragraph(h, header_cell) for h in header])
-        style_cmds += [
-            ("BACKGROUND", (0, 0), (-1, 0), OLIVE_ACCENT),
-        ]
-        start_row = 1
-
-    for label, value in rows:
-        data.append([Paragraph(str(label), cell_bold), Paragraph(str(value), cell_style)])
-
-    style_cmds.append(("ROWBACKGROUNDS", (0, start_row), (-1, -1), [colors.white, ROW_ALT_BG]))
-
-    widths = col_widths or [150, CONTENT_WIDTH - 150]
-    t = Table(data, colWidths=widths, repeatRows=1 if header else 0)
-    t.setStyle(TableStyle(style_cmds))
-    return t
-
-
-def findings_table(issues):
-    """Severity | Finding | Detail table, olive-branded - the mobile-scan
-    equivalent of the website report's issue lists, kept as a proper
-    table (rather than bullet paragraphs) since that's the format the
-    mobile report already used and users are used to scanning."""
-
-    cell_style = ParagraphStyle("FindCell", fontName="Helvetica", fontSize=8.5, leading=11)
-    cell_bold = ParagraphStyle("FindCellBold", parent=cell_style, fontName="Helvetica-Bold")
-    header_cell = ParagraphStyle("FindHeader", parent=cell_bold, textColor=colors.white)
-
-    data = [[
-        Paragraph("Severity", header_cell),
-        Paragraph("Finding", header_cell),
-        Paragraph("Detail", header_cell),
-    ]]
-
-    style_cmds = [
-        ("BACKGROUND", (0, 0), (-1, 0), OLIVE_ACCENT),
-        ("GRID", (0, 0), (-1, -1), 0.4, BORDER_GREY),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ROW_ALT_BG]),
-    ]
-
-    for issue in issues:
-        color = SEVERITY_STATUS_COLOR.get(issue.get("severity"), "#333333")
-        sev_para = Paragraph(f'<font color="{color}"><b>{issue.get("severity", "")}</b></font>', cell_bold)
-        data.append([
-            sev_para,
-            Paragraph(issue.get("title", ""), cell_style),
-            Paragraph(issue.get("detail", ""), cell_style),
-        ])
-
-    t = Table(data, colWidths=[55, 140, CONTENT_WIDTH - 195], repeatRows=1)
-    t.setStyle(TableStyle(style_cmds))
-    return t
 
 
 def footer_note(text, normal_style):

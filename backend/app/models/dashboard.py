@@ -15,6 +15,7 @@ class DashboardStats(Base):
     total_tests = Column(Integer, default=0)
     website_tests = Column(Integer, default=0)
     code_analysis = Column(Integer, default=0)
+    mobile_tests = Column(Integer, default=0)
 
     ai_suggestions = Column(Integer, default=0)
     reports_generated = Column(Integer, default=0)

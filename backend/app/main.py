@@ -16,12 +16,14 @@ from app.routers.dashboard import router as dashboard_router
 from app.models.website_test import WebsiteTest, FunctionalTestResult
 from app.models.security_audit import SecurityAudit
 from app.models.payment import PaymentTransaction
+from app.models.mobile_test import MobileAppTest
 from app.routers.website_test import router as website_router
 from app.routers.code_analysis import router as code_router
 from app.routers.pdf_report import router as pdf_router
 from app.routers.security_audit import router as security_audit_router
 from app.routers.plans import router as plans_router
 from app.routers.payments import router as payments_router
+from app.routers.mobile_test import router as mobile_router
 
 
 # --------------------------------------------------
@@ -82,6 +84,19 @@ def _ensure_website_tests_history_columns():
 _ensure_website_tests_history_columns()
 
 
+def _ensure_dashboard_stats_mobile_column():
+    """Same reasoning as above: create_all() won't add mobile_tests to an
+    already-existing dashboard_stats table."""
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(dashboard_stats)")}
+        if "mobile_tests" not in existing:
+            conn.exec_driver_sql("ALTER TABLE dashboard_stats ADD COLUMN mobile_tests INTEGER DEFAULT 0")
+        conn.commit()
+
+
+_ensure_dashboard_stats_mobile_column()
+
+
 # --------------------------------------------------
 # ROUTERS
 # --------------------------------------------------
@@ -94,6 +109,7 @@ app.include_router(pdf_router)
 app.include_router(security_audit_router)
 app.include_router(plans_router)
 app.include_router(payments_router)
+app.include_router(mobile_router)
 
 
 # --------------------------------------------------
